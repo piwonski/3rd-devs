@@ -5,10 +5,12 @@
     "@types/bun": "latest",
     "@types/express": "^4.17.21",
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^22.7.5",
+    "@types/node": "^22.15.17",
     "@types/uuid": "^10.0.0",
     "drizzle-kit": "^0.24.2",
-    "tsx": "^4.19.1"
+    "ts-node": "^10.9.2",
+    "tsx": "^4.19.1",
+    "typescript": "^5.8.3"
   },
   "scripts": {
     "agent": "bun run agent/app.ts",
