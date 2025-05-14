@@ -20,9 +20,37 @@ const openaiService = new OpenAIService();
 async function generateFixedItem(item: TestItem): Promise<TestItem> {
     return {
         question: item.question,
-        answer: item.answer,
+        answer: performMathematicalOperation(item.question),
         test: await generateFixedTestQuestion(item.test),
     };
+}
+
+function performMathematicalOperation(question: string): number {
+    // Extract numbers and operator from the question
+    const [num1, operator, num2] = question.split(' ');
+    
+    // Convert strings to numbers
+    const a = parseInt(num1);
+    const b = parseInt(num2);
+    
+    // Perform the operation
+    let result = 0;
+    switch (operator) {
+        case '+':
+            result = a + b;
+            break;
+        case '-':
+            result = a - b;
+            break;
+        case '*':
+            result = a * b;
+            break;
+        case '/':
+            result = a / b;
+            break;
+    }
+    
+    return result;
 }
 
 async function generateFixedTestQuestion(test?: TestQuestion): Promise<TestQuestion | undefined> {
