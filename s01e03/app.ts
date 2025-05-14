@@ -1,4 +1,6 @@
+import type OpenAI from "openai";
 import { ExpenseCounter } from "./ExpenseCounter";
+import { OpenAIService } from "./OpenAIService";
 import { RequestService } from "./RequestService";
 import {type CalibrationData, type TestItem, type TestQuestion, type HeadquartersResponse, type ReportBody } from "./types";
 
@@ -13,6 +15,7 @@ const apiKey = process.env.CENTRALA_API_KEY;
 
 const requestService = new RequestService();
 const expenseCounter = new ExpenseCounter();
+const openaiService = new OpenAIService();
 
 async function generateFixedItem(item: TestItem): Promise<TestItem> {
     return {
@@ -26,9 +29,20 @@ async function generateFixedTestQuestion(test?: TestQuestion): Promise<TestQuest
     if (!test) {
         return undefined;
     }
+    const completion = await openaiService.completion([{
+        role: "user",
+        content: test.q
+    }]) as OpenAI.Chat.Completions.ChatCompletion;
+    expenseCounter.increaseCost(completion);
+
+    const answer = completion.choices[0].message.content;
+    
+    console.log("Question: " + test.q);
+    console.log("Answer: " + answer);
+    
     return {
         q: test.q,
-        a: test.a,
+        a: answer ?? test.a,
     };
 }
 
@@ -45,7 +59,6 @@ async function main() {
         apikey: apiKey,
         answer: fixedCalibrationData,
     };
-    console.log("Report body: " + JSON.stringify(reportBody));
     const report = await requestService.post<ReportBody, HeadquartersResponse>(`${host}/report`, reportBody);
     console.log(report);
     
