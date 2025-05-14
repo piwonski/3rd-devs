@@ -28,11 +28,11 @@ async function generateFixedItem(item: TestItem): Promise<TestItem> {
 function performMathematicalOperation(question: string): number {
     // Extract numbers and operator from the question
     const [num1, operator, num2] = question.split(' ');
-    
+
     // Convert strings to numbers
     const a = parseInt(num1);
     const b = parseInt(num2);
-    
+
     // Perform the operation
     let result = 0;
     switch (operator) {
@@ -49,7 +49,7 @@ function performMathematicalOperation(question: string): number {
             result = a / b;
             break;
     }
-    
+
     return result;
 }
 
@@ -57,17 +57,18 @@ async function generateFixedTestQuestion(test?: TestQuestion): Promise<TestQuest
     if (!test) {
         return undefined;
     }
+    const model = 'gpt-4.1-nano';
     const completion = await openaiService.completion([{
         role: "user",
-        content: test.q
-    }]) as OpenAI.Chat.Completions.ChatCompletion;
+        content: test.q 
+    }], model) as OpenAI.Chat.Completions.ChatCompletion;
     expenseCounter.increaseCost(completion);
 
     const answer = completion.choices[0].message.content;
-    
+
     console.log("Question: " + test.q);
     console.log("Answer: " + answer);
-    
+
     return {
         q: test.q,
         a: answer ?? test.a,
@@ -89,7 +90,7 @@ async function main() {
     };
     const report = await requestService.post<ReportBody, HeadquartersResponse>(`${host}/report`, reportBody);
     console.log(report);
-    
+
     console.log("Used tokens: " + JSON.stringify(expenseCounter.getUsedTokens()));
 }
 
