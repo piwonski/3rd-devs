@@ -18,4 +18,9 @@ export class RequestService {
         return data as Response;
     }
 
+    async getText(url: string) {
+        const response = await fetch(url);
+        return response.text();
+    }
+
 }
