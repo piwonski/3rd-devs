@@ -13,7 +13,7 @@ export class HeadquartersService {
         this.apiKey = Environment.getCentralaApiKey();
     }
 
-    async getUncensoredFile(): Promise<string> {
+    async getSensitiveData(): Promise<string> {
         return this.requestService.getText(`${this.host}/data/${this.apiKey}/cenzura.txt`);
     }
     

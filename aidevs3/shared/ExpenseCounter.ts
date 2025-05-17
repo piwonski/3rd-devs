@@ -13,7 +13,7 @@ export class ExpenseCounter {
         this.usedTokens = { input: 0, output: 0, total: 0 };
     }
 
-    async increaseCost(completion: OpenAI.Chat.Completions.ChatCompletion) {
+    increaseCost(completion: OpenAI.Chat.Completions.ChatCompletion) {
         this.usedTokens.input += completion.usage?.prompt_tokens ?? 0;
         this.usedTokens.output += completion.usage?.completion_tokens ?? 0;
         this.usedTokens.total += completion.usage?.total_tokens ?? 0;
