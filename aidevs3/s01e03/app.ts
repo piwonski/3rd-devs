@@ -1,8 +1,8 @@
 import type OpenAI from "openai";
-import { ExpenseCounter } from "./ExpenseCounter";
-import { OpenAIService } from "./OpenAIService";
-import { RequestService } from "./RequestService";
-import {type CalibrationData, type TestItem, type TestQuestion, type HeadquartersResponse, type ReportBody } from "./types";
+import { ExpenseCounter } from "../shared/ExpenseCounter.ts";
+import { RequestService } from "../shared/RequestService.ts";
+import {type CalibrationData, type TestItem, type TestQuestion, type HeadquartersResponse, type ReportBody } from "./types.ts";
+import {OpenAIService} from "../shared/OpenAIService.ts";
 
 if (!process.env.CENTRALA_HOST) {
   throw new Error("CENTRALA_HOST env variable is not set");
@@ -60,7 +60,7 @@ async function generateFixedTestQuestion(test?: TestQuestion): Promise<TestQuest
     const model = 'gpt-4.1-nano';
     const completion = await openaiService.completion([{
         role: "user",
-        content: test.q
+        content: test.q 
     }], model) as OpenAI.Chat.Completions.ChatCompletion;
     expenseCounter.increaseCost(completion);
 

@@ -1,6 +1,6 @@
 import type OpenAI from "openai";
-import {OpenAIService} from "../websearch/OpenAIService.ts";
 import type {ChatCompletionMessageParam} from "ai/prompts";
+import {OpenAIService} from "../shared/OpenAIService";
 
 const host = process.env.XYZ_HOST || "invalid_host";
 

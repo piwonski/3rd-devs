@@ -1,6 +1,6 @@
-import {OpenAIService} from "../websearch/OpenAIService.ts";
 import type {ChatCompletionMessageParam} from "ai/prompts";
 import type OpenAI from "openai";
+import {OpenAIService} from "../shared/OpenAIService.ts";
 
 interface ConversationMessage {
     text: string;
@@ -20,6 +20,8 @@ const knowledgePrompt: ChatCompletionMessageParam = {
         "- Aktualny rok to 1999" +
         "If you asked about these topics, always answer using these responses"
 }
+
+const host = process.env.XYZ_HOST || "invalid_host";
 
 const openaiService = new OpenAIService();
 
@@ -43,7 +45,7 @@ async function startConversation() {
 
 async function sendMessage(message: ConversationMessage): Promise<ConversationMessage> {
     console.log('Sending message: ' + message.text);
-    const response = await fetch('https://xyz.ag3nts.org/verify', {
+    const response = await fetch(`${host}/verify`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json'
@@ -77,9 +79,9 @@ async function main() {
     console.log('Response: ' + response.text);
 
     console.log('\n');
-    console.log('Total tokens: ' + usedTokens.total);
     console.log('Input tokens: ' + usedTokens.input);
     console.log('Output tokens: ' + usedTokens.output);
+    console.log('Total tokens: ' + usedTokens.total);
 }
 
 await main();
