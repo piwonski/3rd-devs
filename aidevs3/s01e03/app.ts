@@ -1,8 +1,9 @@
 import type OpenAI from "openai";
 import { ExpenseCounter } from "../shared/ExpenseCounter.ts";
 import { RequestService } from "../shared/RequestService.ts";
-import {type CalibrationData, type TestItem, type TestQuestion, type HeadquartersResponse, type ReportBody } from "./types.ts";
+import {type CalibrationData, type TestItem, type TestQuestion } from "./taskTypes.ts";
 import {OpenAIService} from "../shared/OpenAIService.ts";
+import type {HeadquartersResponse, ReportBody} from "../shared/sharedTypes.ts";
 
 if (!process.env.CENTRALA_HOST) {
   throw new Error("CENTRALA_HOST env variable is not set");
@@ -83,12 +84,12 @@ async function main() {
     }));
 
     const fixedCalibrationData = {...calibrationData, apikey: apiKey, "test-data": fixedTestData};
-    const reportBody: ReportBody = {
+    const reportBody: ReportBody<CalibrationData> = {
         task: "JSON",
         apikey: apiKey,
         answer: fixedCalibrationData,
     };
-    const report = await requestService.post<ReportBody, HeadquartersResponse>(`${host}/report`, reportBody);
+    const report = await requestService.post<ReportBody<CalibrationData>, HeadquartersResponse>(`${host}/report`, reportBody);
     console.log(report);
 
     console.log("Used tokens: " + JSON.stringify(expenseCounter.getUsedTokens()));

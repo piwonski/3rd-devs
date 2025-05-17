@@ -16,13 +16,3 @@ export interface CalibrationData {
     "test-data": TestItem[];
 }
 
-export interface ReportBody {
-    task: string;
-    apikey: string;
-    answer: CalibrationData;
-}
-
-export interface HeadquartersResponse {
-    code: number;
-    message: string;
-}
