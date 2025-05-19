@@ -7,6 +7,10 @@ export class Environment {
         return this.getEnvironmentVariable("CENTRALA_API_KEY");
     }
 
+    public static getGroqApiKey(): string {
+        return this.getEnvironmentVariable("GROQ_API_KEY");
+    }
+
     private static getEnvironmentVariable(name: string): string {
         const value = process.env[name];
         if (!value) {

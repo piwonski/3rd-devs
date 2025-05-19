@@ -1,15 +1,15 @@
 import type OpenAI from "openai";
-import { ExpenseCounter } from "../shared/ExpenseCounter.ts";
-import { RequestService } from "../shared/RequestService.ts";
-import {type CalibrationData, type TestItem, type TestQuestion } from "./taskTypes.ts";
+import {ExpenseCounter} from "../shared/ExpenseCounter.ts";
+import {RequestService} from "../shared/RequestService.ts";
+import {type CalibrationData, type TestItem, type TestQuestion} from "./taskTypes.ts";
 import {OpenAIService} from "../shared/OpenAIService.ts";
 import type {HeadquartersResponse, ReportBody} from "../shared/sharedTypes.ts";
 
 if (!process.env.CENTRALA_HOST) {
-  throw new Error("CENTRALA_HOST env variable is not set");
+    throw new Error("CENTRALA_HOST env variable is not set");
 }
 if (!process.env.CENTRALA_API_KEY) {
-  throw new Error("CENTRALA_API_KEY env variable is not set");
+    throw new Error("CENTRALA_API_KEY env variable is not set");
 }
 const host = process.env.CENTRALA_HOST;
 const apiKey = process.env.CENTRALA_API_KEY;
@@ -59,10 +59,12 @@ async function generateFixedTestQuestion(test?: TestQuestion): Promise<TestQuest
         return undefined;
     }
     const model = 'gpt-4.1-nano';
-    const completion = await openaiService.completion([{
-        role: "user",
-        content: test.q 
-    }], model) as OpenAI.Chat.Completions.ChatCompletion;
+    const completion = await openaiService.completion({
+        messages: [{
+            role: "user",
+            content: test.q
+        }], model
+    }) as OpenAI.Chat.Completions.ChatCompletion;
     expenseCounter.increaseCost(completion);
 
     const answer = completion.choices[0].message.content;

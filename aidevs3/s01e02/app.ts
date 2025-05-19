@@ -58,11 +58,13 @@ async function sendMessage(message: ConversationMessage): Promise<ConversationMe
 
 async function answerQuestion(question: string) {
     const model = 'gpt-4o-mini';
-    let response = await openaiService.completion([englishPrompt, knowledgePrompt, {
-        role: 'user',
-        content: question
-    }], model) as OpenAI.Chat.Completions.ChatCompletion;
-    
+    let response = await openaiService.completion({
+        messages: [englishPrompt, knowledgePrompt, {
+            role: 'user',
+            content: question
+        }], model
+    }) as OpenAI.Chat.Completions.ChatCompletion;
+
     usedTokens.input += response.usage?.prompt_tokens ?? 0;
     usedTokens.output += response.usage?.completion_tokens ?? 0;
     usedTokens.total += response.usage?.total_tokens ?? 0;

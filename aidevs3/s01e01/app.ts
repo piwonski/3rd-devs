@@ -31,10 +31,12 @@ async function fetchQuestion() {
 }
 
 async function fetchAnswer(question: string) {
-    let response = await openaiService.completion([systemPrompt, {
-        role: 'user',
-        content: question
-    }], 'gpt-4.1-nano') as OpenAI.Chat.Completions.ChatCompletion;
+    let response = await openaiService.completion({
+        messages: [systemPrompt, {
+            role: 'user',
+            content: question
+        }], model: 'gpt-4.1-nano'
+    }) as OpenAI.Chat.Completions.ChatCompletion;
     return response.choices[0].message.content;
 }
 

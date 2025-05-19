@@ -1,4 +1,4 @@
-import { OpenAIService } from "../../audio/OpenAIService";
+import { OpenAIService } from "../shared/OpenAIService";
 import * as fs from 'fs';
 import * as path from 'path';
 import { ExpenseCounter } from "../shared/ExpenseCounter";

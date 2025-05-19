@@ -1,7 +1,7 @@
-import { HeadquartersService } from "../shared/HeadquartersService.ts";
-import { RequestService } from "../shared/RequestService.ts";
-import { OpenAIService } from "../shared/OpenAIService.ts";
-import { ExpenseCounter } from "../shared/ExpenseCounter.ts";
+import {HeadquartersService} from "../shared/HeadquartersService.ts";
+import {RequestService} from "../shared/RequestService.ts";
+import {OpenAIService} from "../shared/OpenAIService.ts";
+import {ExpenseCounter} from "../shared/ExpenseCounter.ts";
 import type {ChatCompletionMessageParam} from "ai/prompts";
 import OpenAI from "openai";
 
@@ -27,7 +27,7 @@ Examples:
 async function main() {
     const sensitiveData = await headquartersService.getSensitiveData();
     console.log(sensitiveData);
-    
+
     console.time('anonymization');
     // const anonymisedData = await anonymizeUsingGpt(sensitiveData);
     const anonymisedData = await anonymizeUsingOllama(sensitiveData);
@@ -36,7 +36,7 @@ async function main() {
 
     const response = await headquartersService.report('CENZURA', anonymisedData);
     console.log(response);
-    
+
     // console.log(expenseCounter.getUsedTokens());
 }
 
@@ -46,10 +46,12 @@ async function anonymizeUsingGpt(sensitiveData: string) {
         role: "system",
         content: anonymisePrompt
     };
-    const completion = await openaiService.completion([systemPrompt, {
-        role: "user",
-        content: sensitiveData
-    }], model) as OpenAI.Chat.Completions.ChatCompletion;
+    const completion = await openaiService.completion({
+        messages: [systemPrompt, {
+            role: "user",
+            content: sensitiveData
+        }], model
+    }) as OpenAI.Chat.Completions.ChatCompletion;
     expenseCounter.increaseCost(completion);
     return completion.choices[0].message.content
 }
@@ -63,7 +65,7 @@ async function anonymizeUsingOllama(sensitiveData: string) {
     };
     const response = await ollama.chat({
         model,
-        messages: [systemPrompt, { role: 'user', content: sensitiveData }]
+        messages: [systemPrompt, {role: 'user', content: sensitiveData}]
     });
     return response.message.content;
 }
