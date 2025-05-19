@@ -50,7 +50,7 @@ async function transcriptAudioFile(file: string, buffer: Buffer) {
 async function investigateAddress(prompt: string): Promise<string | null> {
     console.log('Investigating...');
 
-    const model = 'gpt-4o';
+    const model = 'gpt-4.1-mini';
     const response = await openaiService.completion({
         messages: [{
             role: 'system',
@@ -67,15 +67,19 @@ async function investigateAddress(prompt: string): Promise<string | null> {
 
 const prompt = `
     Otrzymujesz listę transkrypcji wywiadów z osobami, które znają Andrzeja Maja.
-    Nie używaj żadnych innych informacji o Andrzeju Maju niż te zawarte w transkrypcjach.
     Twoim zadaniem jest znalezienie ulicy instytutu uczelni, gdzie wykłada Andrzej Maj.
-    Możesz korzystać z własnej wiedzy do szukania informacji o uczelniach i instytutach w Polsce.
-    Kolejne kroki rozumowania umieść w polu "thinking" JSONa.
     
+    Nie używaj żadnych innych informacji o Andrzeju Maju niż te zawarte w transkrypcjach.
+    Niektóre transkrypcje mogą wprowadzać Cię w błąd, zwróć uwagę na to.
+    
+    Jeśli ulica instytutu nie została jawnie podana w transkrypcji, spróbuj znaleźć tę ulicę na podstawie własnej wiedzy.
+    Zwróć uwagę, aby nie podawać ulicy uczelni, ale konkretnego instytutu, w którym wykłada Andrzej Maj.
+
+    Kolejne kroki rozumowania umieść w polu "thinking" JSONa, każdy krok rozumowania umieść w osobnym elemencie tablicy.
     Odpowiedź przedstaw jako JSON o następującej strukturze:
     
     {
-        "thinking": "<kolejne kroki rozumowania>",
+        "thinking": ["<kolejne kroki rozumowania>"],
         "answer": "<ulica instytutu uczelni, gdzie wykłada Andrzej Maj>"
     }
     
@@ -107,7 +111,7 @@ interface InvestigationAnswer {
 }
 
 async function main() {
-    const transcriptions = await prepareTranscriptions();
+    const transcriptions = await prepareTranscriptions(true);
     console.log('All transcriptions:', transcriptions);
 
 
