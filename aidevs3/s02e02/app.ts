@@ -9,7 +9,7 @@ import ollama from "ollama";
 
 const openAIService = new OpenAIService();
 const expenseCounter = new ExpenseCounter();
-const mapDirectoryName = 'maps-light';
+const mapDirectoryName = 'maps';
 
 const systemPrompt = `
 You are a map expert.
@@ -37,7 +37,7 @@ async function main() {
 
     console.log('Investigating city name...');
 
-    const response = await findCityUsingOllama(mapFiles);
+    const response = await findCityUsingOpenAI(mapFiles);
     console.log(response);
 
     console.log("Used tokens: " + JSON.stringify(expenseCounter.getUsedTokens()));
