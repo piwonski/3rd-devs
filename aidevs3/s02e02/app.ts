@@ -9,7 +9,7 @@ import ollama from "ollama";
 
 const openAIService = new OpenAIService();
 const expenseCounter = new ExpenseCounter();
-const mapDirectoryName = 'maps';
+const mapDirectoryName = 'maps-light';
 
 const systemPrompt = `
 You are a map expert.
@@ -27,13 +27,13 @@ Do not include any other text in your response.
 `;
 
 async function main() {
-    const mapFiles = fs.readdirSync(path.join(__dirname, mapDirectoryName));
+    const mapFiles = fs.readdirSync(path.join(__dirname, mapDirectoryName))
+        .map(file => path.join(__dirname, mapDirectoryName, file));
     console.log('Map files:', mapFiles);
     if (mapFiles.length === 0) {
         console.error('No map files found');
         return;
     }
-
 
     console.log('Investigating city name...');
 
@@ -44,8 +44,7 @@ async function main() {
 }
 
 async function getImageBase64(file: string) {
-    const filePath = path.join(__dirname, mapDirectoryName, file);
-    const fileData = await readFile(filePath);
+    const fileData = await readFile(file);
     return fileData.toString('base64');
 }
 
@@ -74,22 +73,44 @@ async function findCityUsingOpenAI(mapFiles: string[]) {
 }
 
 async function findCityUsingOllama(mapFiles: string[]) {
-    const base64Images = await Promise.all(mapFiles.map(getImageBase64));
-
-    console.time('ollama investigation');    
-    const response = await ollama.chat({
-        model: "llava",
-        messages: [
-            { role: "system", content: systemPrompt },
-            { 
-                role: "user", 
-                content: `Analyze these map images and determine the city name. Here are the maps: ${base64Images.join('\n')}`
-            }
-        ]
-    });
+    console.time('ollama investigation');
+    
+    const responses = [];
+    for (const file of mapFiles) {
+        console.log('Processing map file:', file);
+        const base64Image = await getImageBase64(file);
+        const response = await ollama.chat({
+            model: "gemma3:4b",
+            messages: [
+                { role: "system", content: systemPrompt },
+                { 
+                    role: "user", 
+                    content: `Analyze this map image and determine the city name: ${base64Image}`
+                }
+            ]
+        });
+        responses.push(response.message.content);
+    }
+    
     console.timeEnd('ollama investigation');
-
-    return response.message.content;
+    
+    // Combine all responses and find the most consistent city name
+    const cityResponses = responses.map(r => JSON.parse(r));
+    console.log('All responses:', cityResponses);
+    
+    // Find the most common city name
+    const cityCounts = cityResponses.reduce((acc, curr) => {
+        acc[curr.city] = (acc[curr.city] || 0) + 1;
+        return acc;
+    }, {} as Record<string, number>);
+    
+    const mostCommonCity = Object.entries(cityCounts)
+        .sort((a, b) => b[1] - a[1])[0][0];
+    
+    return {
+        thinking: cityResponses.map(r => r.thinking).join('\n'),
+        city: mostCommonCity
+    };
 }
 
 await main();
