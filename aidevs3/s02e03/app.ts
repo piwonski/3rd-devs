@@ -52,6 +52,9 @@ async function main() {
 
     const localPath = await prepareLocalOutputPath();
     await downloadImage(imageUrl, localPath);
+
+    const headquartersResponse = await headquartersService.report("robotid", imageUrl);
+    console.log("Headquarters Response:", headquartersResponse);
 }
 
 await main();
