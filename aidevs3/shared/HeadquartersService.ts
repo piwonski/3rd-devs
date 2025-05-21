@@ -14,10 +14,18 @@ export class HeadquartersService {
     }
 
     async getSensitiveData(): Promise<string> {
-        return this.requestService.getText(`${this.host}/data/${this.apiKey}/cenzura.txt`);
+        return this.requestService.getText(`${this.getDataPath()}/cenzura.txt`);
+    }
+
+    async getRobotDescription(): Promise<string> {
+        return this.requestService.getText(`${this.getDataPath()}/robotid.json`);
     }
     
     report<ANSWER>(task: string, answer: ANSWER) {
         return this.requestService.post<ReportBody<ANSWER>, HeadquartersResponse>(`${this.host}/report`, { task, apikey: this.apiKey, answer });
+    }
+
+    private getDataPath() {
+        return `${this.host}/data/${this.apiKey}`;
     }
 }

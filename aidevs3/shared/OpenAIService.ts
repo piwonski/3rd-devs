@@ -47,5 +47,40 @@ export class OpenAIService {
     });
     return transcription.text;
   }
+
+  async generateImage(prompt: string): Promise<string> {
+    console.log("Generating image...");
+    try {
+      const response = await this.openai.images.generate({
+        model: "dall-e-3",
+        prompt,
+        n: 1,
+        size: "1024x1024",
+        quality: "standard",
+        style: "natural"
+      });
+
+      if (!response.data) {
+        throw new Error("No data in response");
+      }
+
+      console.log("Image Generation Response:", {
+        created: response.created,
+        data: response.data.map(img => ({
+          url: img.url,
+          revised_prompt: img.revised_prompt
+        }))
+      });
+
+      if (!response.data[0]?.url) {
+        throw new Error("No image URL in response");
+      }
+
+      return response.data[0].url;
+    } catch (error) {
+      console.error("Error generating image:", error);
+      throw error;
+    }
+  }
 }
 
