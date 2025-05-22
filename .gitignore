@@ -6,3 +6,4 @@ node_modules/
 **/*.db
 .vscode/
 aidevs3/s02e03/output-images/
+/aidevs3/s02e04/input-files/
