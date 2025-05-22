@@ -1,7 +1,10 @@
 import { OpenAI, toFile } from "openai";
 import type { ChatCompletionMessageParam } from "openai/resources/chat/completions";
+import type { ChatCompletionContentPart } from "openai/resources/chat/completions";
 import Groq from "groq-sdk";
 import { Environment } from "./Environment";
+import fs from "fs";
+
 export class OpenAIService {
   private openai: OpenAI;
   private groq: Groq;
@@ -79,6 +82,39 @@ export class OpenAIService {
       return response.data[0].url;
     } catch (error) {
       console.error("Error generating image:", error);
+      throw error;
+    }
+  }
+
+  async processImage(imagePath: string, prompt: string): Promise<{ description: string; source: string }> {
+    try {
+      const image = await fs.promises.readFile(imagePath);
+      const base64Image = image.toString('base64');
+
+      const messages: ChatCompletionMessageParam[] = [
+        {
+          role: "system",
+          content: prompt,
+        },
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } },
+          ],
+        },
+      ];
+
+      const response = await this.openai.chat.completions.create({
+        model: "gpt-4o",
+        messages,
+      });
+
+      return {
+        description: response.choices[0].message.content || "No description available.",
+        source: imagePath,
+      };
+    } catch (error) {
+      console.error(`Error processing image ${imagePath}:`, error);
       throw error;
     }
   }
