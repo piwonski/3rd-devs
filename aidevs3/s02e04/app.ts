@@ -22,6 +22,14 @@ const prompt = `
     People category is assigned to reports that contain information about catched or identified people.
     Hardware category is assigned to reports that contain information about fixed or repaired hardware.
     Other category is assigned to reports that contain information about other things.
+
+    Have in mind that 'people' category is assigned only to reports that contain information about catched or identified people.
+    If there is no strict information about people, the answer should be 'other'.
+
+    Similar situation is with 'hardware' category.
+    Hardware category is assigned to reports that contain information about fixed or repaired hardware.
+    If there is no strict information about hardware, the answer should be 'other'.
+
     You need to return the report in the following JSON format:
     {
         "thinking": "<your thinking process here>",
