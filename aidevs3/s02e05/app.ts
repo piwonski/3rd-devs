@@ -4,53 +4,11 @@ import { RequestService } from '../shared/RequestService';
 import { promises as fs } from 'fs';
 import fsSync from 'fs';
 import path from 'path';
-import TurndownService from 'turndown';
+import { HtmlToMarkdownConverter } from '../shared/HtmlToMarkdownConverter';
 
 const requestService = new RequestService();
 const headquartersService = new HeadquartersService(requestService);
-const turndownService = new TurndownService({
-    headingStyle: 'atx',
-    codeBlockStyle: 'fenced',
-    emDelimiter: '*',
-    bulletListMarker: '-',
-    strongDelimiter: '**',
-    linkStyle: 'inlined',
-    hr: '---'
-});
-
-function convertToAbsoluteUrl(url: string, baseUrl: string): string {
-    if (url.startsWith('http')) return url;
-    return url.startsWith('/') ? `${baseUrl}${url}` : `${baseUrl}/${url}`;
-}
-
-function cleanHtml(html: string): string {
-    // Remove style elements and their contents
-    html = html.replace(/<style[^>]*>[\s\S]*?<\/style>/gi, '');
-    // Remove HTML comments
-    html = html.replace(/<!--[\s\S]*?-->/g, '');
-    
-    // Convert relative URLs to absolute URLs
-    const baseUrl = 'https://c3ntrala.ag3nts.org/dane';
-    
-    // Handle image sources
-    html = html.replace(/<img[^>]+src="([^"]+)"[^>]*>/g, (match, src) => {
-        const absoluteSrc = convertToAbsoluteUrl(src, baseUrl);
-        return match.replace(src, absoluteSrc);
-    });
-    
-    // Handle links
-    html = html.replace(/<a[^>]+href="([^"]+)"[^>]*>/g, (match, href) => {
-        const absoluteHref = convertToAbsoluteUrl(href, baseUrl);
-        return match.replace(href, absoluteHref);
-    });
-    
-    return html;
-}
-
-async function convertHtmlToMarkdown(html: string): Promise<string> {
-    const cleanedHtml = cleanHtml(html);
-    return turndownService.turndown(cleanedHtml);
-}
+const htmlToMarkdownConverter = new HtmlToMarkdownConverter();
 
 async function main() {
     // Create cache directory if it doesn't exist
@@ -64,7 +22,7 @@ async function main() {
     // Convert HTML to Markdown
     if (!fsSync.existsSync(path.join(cacheDir, 'article.md'))) {
         console.log('Converting HTML to Markdown...');
-        const markdown = await convertHtmlToMarkdown(article);
+        const markdown = await htmlToMarkdownConverter.convert(article);
         
         // Save to file
         const outputPath = path.join(cacheDir, 'article.md');
