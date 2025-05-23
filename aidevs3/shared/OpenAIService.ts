@@ -118,5 +118,43 @@ export class OpenAIService {
       throw error;
     }
   }
+
+  async processImageWithPrompt(base64Image: string, prompt: string, imageName: string): Promise<{ name: string; preview: string }> {
+    try {
+      const messages: ChatCompletionMessageParam[] = [
+        {
+          role: "user",
+          content: [
+            { type: "image_url", image_url: { url: `data:image/jpeg;base64,${base64Image}` } },
+            { type: "text", text: prompt }
+          ],
+        },
+      ];
+
+      const response = await this.openai.chat.completions.create({
+        model: "gpt-4o",
+        messages,
+        response_format: { type: "json_object" }
+      });
+
+      try {
+        const result = JSON.parse(response.choices[0].message.content || '{}');
+        return { 
+          name: imageName, 
+          preview: result.preview || '' 
+        };
+      } catch (parseError) {
+        console.error('Error parsing JSON response:', parseError);
+        // Fallback to using the raw content if JSON parsing fails
+        return {
+          name: imageName,
+          preview: response.choices[0].message.content || ''
+        };
+      }
+    } catch (error) {
+      console.error('Error processing image:', error);
+      throw error;
+    }
+  }
 }
 
