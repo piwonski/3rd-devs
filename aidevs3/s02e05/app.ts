@@ -238,6 +238,27 @@ async function processAndEnhanceMarkdown(markdown: string, cacheDir: string): Pr
     return enhancedMarkdown;
 }
 
+const questionPrompt = `
+You are a helpful assistant that can answer questions about the article.
+You are given an article and few, numbered questions.
+You need to answer the questions based on the article.
+
+Article:
+{article}
+
+Questions:
+{questions}
+
+Answer the questions in the following JSON format:
+{
+    "01": "answer to question 01",
+    "02": "answer to question 02",
+    "03": "answer to question 03",
+    ...
+}
+Do not include any other text in your response.
+`;
+
 async function main() {
     // Create cache directory if it doesn't exist
     const cacheDir = path.join(__dirname, 'cache');
@@ -265,6 +286,23 @@ async function main() {
     // Fetch the questions
     const questions = await headquartersService.getArxivQuestions();
     console.log('Questions:', questions);
+
+    const enhancedArticle = await fs.readFile(path.join(cacheDir, 'enahnced-article.md'), 'utf-8');
+
+    const answer = await openAIService.completion({
+        messages: [
+            { role: 'user', content: questionPrompt.replace('{article}', enhancedArticle).replace('{questions}', questions) }
+        ],
+        model: 'gpt-4o',
+        jsonMode: true
+    });
+
+    if ('choices' in answer) {
+        console.log('Answer:', answer.choices[0].message.content);
+    } else {
+        console.error('Unexpected response format from OpenAI: ', answer);
+
+    }
 }
 
 await main();
