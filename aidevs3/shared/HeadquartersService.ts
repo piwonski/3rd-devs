@@ -22,7 +22,7 @@ export class HeadquartersService {
     }
 
     async getArxivHtml(): Promise<string> {
-        return this.requestService.getText(`${this.getDataPath()}/arxiv.html`);
+        return this.requestService.getText(`${this.host}/dane/arxiv-draft.html`);
     }
 
     async getArxivQuestions(): Promise<string> {
