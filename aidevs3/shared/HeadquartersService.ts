@@ -14,18 +14,30 @@ export class HeadquartersService {
     }
 
     async getSensitiveData(): Promise<string> {
-        return this.requestService.getText(`${this.getDataPath()}/cenzura.txt`);
+        return this.requestService.getText(`${this.getApiKeyDataPath()}/cenzura.txt`);
     }
 
     async getRobotDescription(): Promise<string> {
-        return this.requestService.getText(`${this.getDataPath()}/robotid.json`);
+        return this.requestService.getText(`${this.getApiKeyDataPath()}/robotid.json`);
     }
-    
+
+    async getArxivHtml(): Promise<string> {
+        return this.requestService.getText(`${this.getDataPath()}/arxiv.html`);
+    }
+
+    async getArxivQuestions(): Promise<string> {
+        return this.requestService.getText(`${this.getApiKeyDataPath()}/arxiv.txt`);
+    }
+
     report<ANSWER>(task: string, answer: ANSWER) {
         return this.requestService.post<ReportBody<ANSWER>, HeadquartersResponse>(`${this.host}/report`, { task, apikey: this.apiKey, answer });
     }
 
+    private getApiKeyDataPath() {
+        return `${this.getDataPath()}/${this.apiKey}`;
+    }
+
     private getDataPath() {
-        return `${this.host}/data/${this.apiKey}`;
+        return `${this.host}/data`;
     }
 }
