@@ -242,6 +242,9 @@ const questionPrompt = `
 You are a helpful assistant that can answer questions about the article.
 You are given an article and few, numbered questions.
 You need to answer the questions based on the article.
+Take into account the images' descriptions and audio files' transcriptions given in the article.
+Be concise and to the point.
+Use specific names instead of generic ones.
 
 Article:
 {article}
@@ -264,45 +267,57 @@ async function main() {
     const cacheDir = path.join(__dirname, 'cache');
     await fs.mkdir(cacheDir, { recursive: true });
     
-    // Fetch the article
-    const article = await headquartersService.getArxivHtml();
-    console.log('Article fetched');
     
-    // Convert HTML to Markdown
+    let markdown = '';
     if (!fsSync.existsSync(path.join(cacheDir, 'article.md'))) {
+        // Fetch the article
+        const article = await headquartersService.getArxivHtml();
+        console.log('Article fetched');
+
+        // Convert HTML to Markdown
         console.log('Converting HTML to Markdown...');
-        const markdown = await htmlToMarkdownConverter.convert(article);
-        
+        markdown = await htmlToMarkdownConverter.convert(article);
+    } else {
+        console.log('Loading article from cache...');
+        markdown = await fs.readFile(path.join(cacheDir, 'article.md'), 'utf-8');
+    }
+
+    let enhancedMarkdown = '';
+    if (!fsSync.existsSync(path.join(cacheDir, 'enhanced-article.md'))) {
         // Process images and enhance markdown with descriptions
         console.log('Processing images...');
-        const enhancedMarkdown = await processAndEnhanceMarkdown(markdown, cacheDir);
-        
+        enhancedMarkdown = await processAndEnhanceMarkdown(markdown, cacheDir);
+            
         // Save to file
-        const outputPath = path.join(cacheDir, 'enahnced-article.md');
+        const outputPath = path.join(cacheDir, 'enhanced-article.md');
         await fs.writeFile(outputPath, enhancedMarkdown, 'utf-8');
         console.log('Article saved to:', outputPath);
+    } else {
+        console.log('Loading enhanced article from cache...');
+        enhancedMarkdown = await fs.readFile(path.join(cacheDir, 'enhanced-article.md'), 'utf-8');
     }
     
     // Fetch the questions
     const questions = await headquartersService.getArxivQuestions();
     console.log('Questions:', questions);
 
-    const enhancedArticle = await fs.readFile(path.join(cacheDir, 'enahnced-article.md'), 'utf-8');
 
-    const answer = await openAIService.completion({
+    const answerResponse = await openAIService.completion({
         messages: [
-            { role: 'user', content: questionPrompt.replace('{article}', enhancedArticle).replace('{questions}', questions) }
+            { role: 'user', content: questionPrompt.replace('{article}', enhancedMarkdown).replace('{questions}', questions) }
         ],
         model: 'gpt-4o',
         jsonMode: true
     });
 
-    if ('choices' in answer) {
-        console.log('Answer:', answer.choices[0].message.content);
-    } else {
-        console.error('Unexpected response format from OpenAI: ', answer);
-
+    if (!('choices' in answerResponse)) {
+        console.error('Unexpected response format from OpenAI: ', answerResponse);
+        return;
     }
+    const answer = answerResponse.choices[0].message.content ?? '';
+    console.log('Answer:', answer);
+    const headquartersResponse = await headquartersService.report('arxiv', JSON.parse(answer));
+    console.log('Headquarters answer:', headquartersResponse);
 }
 
 await main();
