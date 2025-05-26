@@ -119,40 +119,47 @@ async function generateFactSummary(trace: LangfuseTraceClient, fact: { filename:
 
 async function generateFactsSummaries(facts: Array<{ filename: string; content: string }>): Promise<string[]> {
     const trace = langfuseService.createTrace({id: uuidv4(), name: 'S03E01/facts-summaries', sessionId: uuidv4()});
+    const summaries: string[] = [];
 
     console.log('Generating summaries for facts...');
-    const summaryPromises = facts.map(async (fact) => {
+    for (const fact of facts) {
         const factFromCache = await getContentFromCache(fact.filename);
         if (factFromCache) {
-            return factFromCache;
+            summaries.push(factFromCache);
+            continue;
         }
         
         const summary = await generateFactSummary(trace, fact);
-        console.log(`Generated summary for ${fact.filename}: \n${summary}\n`);        console.log(`\n${summary}\n`);
+        console.log(`Generated summary for ${fact.filename}: \n${summary}\n`);
         await saveContentToCache(summary, fact.filename);
-        return summary;
-    });
+        summaries.push(summary);
+    }
 
-    return Promise.all(summaryPromises);
+    return summaries;
 }
 
 async function generateKeywordsForReports(facts: string[], reports: Array<{ filename: string; content: string }>): Promise<string> {
     const trace = langfuseService.createTrace({id: uuidv4(), name: 'S03E01/report-keywords', sessionId: uuidv4()});
+    const reportKeywords: Array<{ [key: string]: string }> = [];
 
     console.log('Generating keywords for reports...');
-    const keywordPromises = reports.map(async (report) => {
+    for (const report of reports) {
         const keywordsFromCache = await getContentFromCache(report.filename);
         if (keywordsFromCache) {
-            return { [report.filename]: keywordsFromCache };
+            reportKeywords.push({
+                [report.filename]: keywordsFromCache
+            });
+            continue;
         }
 
         const keywords = await generateReportKeywords(trace, facts, report);
         console.log(`Generated keywords for ${report.filename}: \n${keywords}\n`);
         await saveContentToCache(keywords, report.filename);
-        return { [report.filename]: keywords };
-    });
+        reportKeywords.push({
+            [report.filename]: keywords
+        });
+    }
 
-    const reportKeywords = await Promise.all(keywordPromises);
     await langfuseService.flushAsync();
     return JSON.stringify(Object.assign({}, ...reportKeywords));
 }
