@@ -4,11 +4,15 @@ import { OpenAIService } from '../shared/OpenAIService';
 import { RequestService } from '../shared/RequestService';
 import { HeadquartersService } from '../shared/HeadquartersService';
 import { ExpenseCounter } from '../shared/ExpenseCounter';
+import { LangfuseService } from '../shared/LangfuseService';
+import { LangfuseTraceClient } from 'langfuse';
+import { v4 as uuidv4 } from 'uuid';
 
 const requestService = new RequestService();
 const openAIService = new OpenAIService();
 const headquartersService = new HeadquartersService(requestService);
 const expenseCounter = new ExpenseCounter();
+const langfuseService = new LangfuseService();
 
 const prompt = `
 You are an assistant specialized in preparing keywords for reports
@@ -82,33 +86,50 @@ async function saveKeywordsToCache(keywords: string): Promise<void> {
 }
 
 async function generateKeywordsForReports(facts: string[], reports: Array<{ filename: string; content: string }>): Promise<string> {
+    const trace = langfuseService.createTrace({id: uuidv4(), name: 'S03E01', sessionId: uuidv4()});
+
     const reportKeywords = [];
     for (const report of reports) {
         reportKeywords.push({
-            [report.filename]: await generateKeywords(facts, report)
+            [report.filename]: await generateKeywords(trace, facts, report)
         });
     }
     return JSON.stringify(Object.assign({}, ...reportKeywords));
 }
 
-async function generateKeywords(facts: string[], report: { filename: string; content: string }): Promise<string> {
+async function generateKeywords(trace: LangfuseTraceClient, facts: string[], report: { filename: string; content: string; }): Promise<string> {
     console.log(`Generating keywords for ${report.filename}...`);
+
+    const generation = langfuseService.createGeneration(trace, 'generate-keywords', {
+        report_name: report.filename,
+        report_content: report.content
+    });
+
     const factsText = facts.join('\n');
     const filledPrompt = prompt
         .replace('{{facts}}', factsText)
         .replace('{{report_name}}', report.filename)
         .replace('{{report_content}}', report.content);
 
-    const response = await openAIService.completion({
-        messages: [{ role: 'user', content: filledPrompt }],
-        model: 'gpt-4o',
-        stream: false
-    });
-
-    if ('choices' in response && response.choices[0]?.message?.content) {
-        return response.choices[0].message.content;
+    try {
+        const response = await openAIService.completion({
+            messages: [{ role: 'user', content: filledPrompt }],
+            model: 'gpt-4o',
+            stream: false
+        });
+        if ('choices' in response && response.choices[0]?.message?.content) {
+            langfuseService.finalizeGeneration(generation, response.choices[0].message, response.model, {
+                promptTokens: response.usage?.prompt_tokens,
+                completionTokens: response.usage?.completion_tokens,
+                totalTokens: response.usage?.total_tokens
+            });
+            return response.choices[0].message.content;
+        }
+        throw new Error('Unexpected response format from OpenAI');
+    } catch (error: any) {
+        langfuseService.finalizeGeneration(generation, { error: error.message }, "unknown");
+        throw error;
     }
-    throw new Error('Unexpected response format from OpenAI');
 }
 
 async function main() {
@@ -123,6 +144,7 @@ async function main() {
         console.log('Generating keywords for reports...');
         keywordsMap = await generateKeywordsForReports(facts, reports);
         await saveKeywordsToCache(keywordsMap);
+
     }
 
     console.log('Keywords map:', keywordsMap);
