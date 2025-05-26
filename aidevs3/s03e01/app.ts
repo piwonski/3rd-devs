@@ -8,6 +8,7 @@ import { LangfuseService } from '../shared/LangfuseService';
 import { LangfuseTraceClient } from 'langfuse';
 import { v4 as uuidv4 } from 'uuid';
 import type OpenAI from 'openai';
+import { directions } from '@googlemaps/google-maps-services-js/dist/directions';
 
 const requestService = new RequestService();
 const openAIService = new OpenAIService();
@@ -15,7 +16,12 @@ const headquartersService = new HeadquartersService(requestService);
 const expenseCounter = new ExpenseCounter();
 const langfuseService = new LangfuseService();
 
-const prompt = `
+const factsKeywordsPrompt = `
+Provide a summary of the given facts, extract key information like: person's identity, occupation, name of technology the person is familiar with.
+`
+
+const reportKeywordsPrompt = `
+You are the report analyst. Imagine you are a detective, trying to find the most important information in the report.
 You need to analyze given facts, extract key information and use this information to prepare a list of keywords for the given report.
 Identify key information from the report: what happened, where and who was involved, which items and technologies were described.
 Find facts related to the analysed report. The most often link will be people mentioned in the report and in the facts.
@@ -34,29 +40,28 @@ There is no limitation on the number of keywords.
 The list of keywords should be in the following format:
 keyword1, keyword2, keyword3, ...
 `
-
-async function readFacts(): Promise<string[]> {
+async function readFacts(): Promise<Array<{ filename: string; content: string }>> {
     const factsDir = join(__dirname, 'input-files', 'facts');
-    const files = await readdir(factsDir);
-    const facts = await Promise.all(
-        files.map(async (file) => readFile(join(factsDir, file), 'utf-8'))
-    );
-    return facts;
+    return await readFileContents(factsDir);
 }
 
 async function readReports(): Promise<Array<{ filename: string; content: string }>> {
     const reportsDir = join(__dirname, 'input-files', 'reports');
-    const files = await readdir(reportsDir);
+    return await readFileContents(reportsDir);
+}
+
+async function readFileContents(directory: string): Promise<Array<{ filename: string; content: string }>> {
+    const files = await readdir(directory);
     const reports = await Promise.all(
         files.map(async (file) => ({
             filename: file,
-            content: await readFile(join(reportsDir, file), 'utf-8')
+            content: await readFile(join(directory, file), 'utf-8')
         }))
     );
     return reports;
 }
 
-async function getKeywordsFromCache(filename: string): Promise<string | null> {
+async function getContentFromCache(filename: string): Promise<string | null> {
     const cacheFile = join(__dirname, 'cache', filename);
     try {
         return await readFile(cacheFile, 'utf-8');
@@ -65,30 +70,86 @@ async function getKeywordsFromCache(filename: string): Promise<string | null> {
     }
 }
 
-async function saveKeywordsToCache(keywords: string, filename: string): Promise<void> {
+async function saveContentToCache(content: string, filename: string): Promise<void> {
     const cacheDir = join(__dirname, 'cache');
     await mkdir(cacheDir, { recursive: true });
-    await writeFile(join(cacheDir, filename), keywords, 'utf-8');
+    await writeFile(join(cacheDir, filename), content, 'utf-8');
+}
+
+async function generateFactSummary(trace: LangfuseTraceClient, fact: { filename: string; content: string }): Promise<string> {
+    const generation = langfuseService.createGeneration(trace, 'generate-fact-summary', {
+        prompt: factsKeywordsPrompt,
+        fact: fact
+    });
+
+    try {
+        const response = await openAIService.completion({
+            messages: [
+                { role: 'system', content: factsKeywordsPrompt },
+                { role: 'user', content: fact.content }
+            ],
+            model: 'gpt-4',
+            stream: false
+        }) as OpenAI.Chat.Completions.ChatCompletion;
+        
+        expenseCounter.increaseCost(response);
+
+        if ('choices' in response && response.choices[0]?.message?.content) {
+            langfuseService.finalizeGeneration(generation, response.choices[0].message, response.model, {
+                promptTokens: response.usage?.prompt_tokens,
+                completionTokens: response.usage?.completion_tokens,
+                totalTokens: response.usage?.total_tokens
+            });
+            return response.choices[0].message.content;
+        } else {
+            throw new Error('Unexpected response format from OpenAI');
+        }
+    } catch (error: any) {
+        langfuseService.finalizeGeneration(generation, { error: error.message }, "unknown");
+        throw error;
+    }
+}
+
+async function generateFactsSummaries(facts: Array<{ filename: string; content: string }>): Promise<string[]> {
+    const trace = langfuseService.createTrace({id: uuidv4(), name: 'S03E01/facts-summaries', sessionId: uuidv4()});
+    const summaries: string[] = [];
+
+    for (const fact of facts) {
+        const factFromCache = await getContentFromCache(fact.filename);
+        if (factFromCache) {
+            summaries.push(factFromCache);
+            continue;
+        } else {
+            console.log(`Generating summary for ${fact.filename}...`);
+            const summary = await generateFactSummary(trace, fact);
+            console.log(`\n${summary}\n`);
+            summaries.push(summary);
+            await saveContentToCache(summary, fact.filename);
+        }
+    }
+
+    return summaries;
 }
 
 async function generateKeywordsForReports(facts: string[], reports: Array<{ filename: string; content: string }>): Promise<string> {
-    const trace = langfuseService.createTrace({id: uuidv4(), name: 'S03E01', sessionId: uuidv4()});
+    const trace = langfuseService.createTrace({id: uuidv4(), name: 'S03E01/report-keywords', sessionId: uuidv4()});
 
     const reportKeywords: Array<{ [key: string]: string }> = [];
 
     for (const report of reports) {
-        const keywordsFromCache = await getKeywordsFromCache(report.filename);
+        const keywordsFromCache = await getContentFromCache(report.filename);
         if (keywordsFromCache) {
             reportKeywords.push({
                 [report.filename]: keywordsFromCache
             });
         } else {
-            const keywords = await generateKeywords(trace, facts, report);
-            console.log(`\n${keywords}\n`);
+            console.log(`Generating keywords for ${report.filename}...`);
+            const keywords = await generateReportKeywords(trace, facts, report);
+            console.log(`Generated keywords for ${report.filename}: \n${keywords}\n`);
             reportKeywords.push({
                 [report.filename]: keywords
             });
-            await saveKeywordsToCache(keywords, report.filename);
+            await saveContentToCache(keywords, report.filename);
         }
     }
 
@@ -96,23 +157,21 @@ async function generateKeywordsForReports(facts: string[], reports: Array<{ file
     return JSON.stringify(Object.assign({}, ...reportKeywords));
 }
 
-async function generateKeywords(trace: LangfuseTraceClient, facts: string[], report: { filename: string; content: string; }): Promise<string> {
-    console.log(`Generating keywords for ${report.filename}...`);
-
+async function generateReportKeywords(trace: LangfuseTraceClient, facts: string[], report: { filename: string; content: string; }): Promise<string> {
     const generation = langfuseService.createGeneration(trace, 'generate-keywords', {
-        prompt,
+        prompt: reportKeywordsPrompt,
         report_name: report.filename,
         report_content: report.content
     });
 
     const factsText = facts.join('\n\n');
-    const factsPrompt = `
+    const factsInput = `
         <facts>
         ${factsText}
         </facts>
     `
 
-    const reportPrompt = `
+    const reportsInput = `
         <report>
         ${report.filename}
         ${report.content}
@@ -122,9 +181,9 @@ async function generateKeywords(trace: LangfuseTraceClient, facts: string[], rep
     try {
         const response = await openAIService.completion({
             messages: [
-                { role: 'system', content: prompt },
-                { role: 'system', content: factsPrompt }, 
-                { role: 'user', content: reportPrompt }
+                { role: 'system', content: reportKeywordsPrompt },
+                { role: 'system', content: factsInput }, 
+                { role: 'user', content: reportsInput }
             ],
             model: 'gpt-4o',
             stream: false
@@ -154,10 +213,15 @@ async function main() {
     const reports = await readReports();
     console.log('Number of reports:', reports.length);
 
-    console.log('Generating keywords for reports...');
-    const keywordsMap = await generateKeywordsForReports(facts, reports);
-    await saveKeywordsToCache(keywordsMap, 'keywords.json');
+    console.log('Generating facts summary...');
+    const factsSummary = await generateFactsSummaries(facts);
+    await saveContentToCache(JSON.stringify(factsSummary), 'facts-summary.json');
 
+    console.log('Generating keywords for reports...');
+    const keywordsMap = await generateKeywordsForReports(factsSummary, reports);
+    await saveContentToCache(keywordsMap, 'keywords.json');
+
+    console.log('Sending report to headquarters...');
     const headquartersResponse = await headquartersService.report('dokumenty', JSON.parse(keywordsMap));
     console.log('Headquarters response:', headquartersResponse);
 
