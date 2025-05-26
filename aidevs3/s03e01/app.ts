@@ -22,27 +22,18 @@ Find facts related to the analysed report. The most often link will be people me
 Use also the report name while preparing the list of keywords. Not necesarily as a one of the keywords, but as a context for the keywords.
 Keywords MUST BE in Polish language.
 Keywords MUST BE in nominative case (e.g 'nauczyciel', 'programista, NOT 'nauczyciela', 'programistów')
-Keyword list should precisely describe the report, taking into account report content, related facts and information from the filename
+Keyword list should precisely describe the report, taking into account report content, related facts and information from the filename.
+If the report is about a person, find related facts about this person, their occupation, skills, etc and use them to generate keywords.
+
+<Examples>
+If the report mentions about 'Adam Kowalski' and there is a fact about 'Adam Kowalski' being a teacher, one of the keywords should be 'nauczyciel'.
+If the report mentions about 'Barbara Nowak' and there is a fact about 'Barbara Nowak' being a programmer, one of the keywords should be 'programista'.
+</Examples>
+
 There is no limitation on the number of keywords.
 The list of keywords should be in the following format:
 keyword1, keyword2, keyword3, ...
 `
-
-interface OpenAIResponse {
-    choices: Array<{
-        message: {
-            content: string;
-        };
-    }>;
-}
-
-interface OpenAIRequest {
-    model: string;
-    messages: Array<{
-        role: string;
-        content: string;
-    }>;
-}
 
 async function readFacts(): Promise<string[]> {
     const factsDir = join(__dirname, 'input-files', 'facts');
@@ -68,9 +59,7 @@ async function readReports(): Promise<Array<{ filename: string; content: string 
 async function getKeywordsFromCache(filename: string): Promise<string | null> {
     const cacheFile = join(__dirname, 'cache', filename);
     try {
-        const keywords = await readFile(cacheFile, 'utf-8');
-        console.log('Keywords found in cache');
-        return keywords;
+        return await readFile(cacheFile, 'utf-8');
     } catch {
         return null;
     }
@@ -90,13 +79,12 @@ async function generateKeywordsForReports(facts: string[], reports: Array<{ file
     for (const report of reports) {
         const keywordsFromCache = await getKeywordsFromCache(report.filename);
         if (keywordsFromCache) {
-            console.log(`Keywords for ${report.filename} found in cache: ${keywordsFromCache}`);
             reportKeywords.push({
                 [report.filename]: keywordsFromCache
             });
         } else {
             const keywords = await generateKeywords(trace, facts, report);
-            console.log(`Keywords for ${report.filename} generated: ${keywords}`);
+            console.log(`\n${keywords}\n`);
             reportKeywords.push({
                 [report.filename]: keywords
             });
@@ -165,14 +153,10 @@ async function main() {
 
     const reports = await readReports();
     console.log('Number of reports:', reports.length);
-    
-    let keywordsMap = await getKeywordsFromCache('keywords.json');
-    if (!keywordsMap) {
-        console.log('Generating keywords for reports...');
-        keywordsMap = await generateKeywordsForReports(facts, reports);
-        await saveKeywordsToCache(keywordsMap, 'keywords.json');
 
-    }
+    console.log('Generating keywords for reports...');
+    const keywordsMap = await generateKeywordsForReports(facts, reports);
+    await saveKeywordsToCache(keywordsMap, 'keywords.json');
 
     const headquartersResponse = await headquartersService.report('dokumenty', JSON.parse(keywordsMap));
     console.log('Headquarters response:', headquartersResponse);
