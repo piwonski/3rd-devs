@@ -101,12 +101,13 @@ async function generateFactSummary(trace: LangfuseTraceClient, fact: { filename:
         
         expenseCounter.increaseCost(response);
 
+        langfuseService.finalizeGeneration(generation, response, response.model, {
+            promptTokens: response.usage?.prompt_tokens,
+            completionTokens: response.usage?.completion_tokens,
+            totalTokens: response.usage?.total_tokens
+        });
+
         if ('choices' in response && response.choices[0]?.message?.content) {
-            langfuseService.finalizeGeneration(generation, response.choices[0].message, response.model, {
-                promptTokens: response.usage?.prompt_tokens,
-                completionTokens: response.usage?.completion_tokens,
-                totalTokens: response.usage?.total_tokens
-            });
             return response.choices[0].message.content;
         } else {
             throw new Error('Unexpected response format from OpenAI');
@@ -121,7 +122,6 @@ async function generateFactsSummaries(facts: Array<{ filename: string; content: 
     const trace = langfuseService.createTrace({id: uuidv4(), name: 'S03E01/facts-summaries', sessionId: uuidv4()});
     const summaries: string[] = [];
 
-    console.log('Generating summaries for facts...');
     for (const fact of facts) {
         const factFromCache = await getContentFromCache(fact.filename);
         if (factFromCache) {
@@ -142,7 +142,6 @@ async function generateKeywordsForReports(facts: string[], reports: Array<{ file
     const trace = langfuseService.createTrace({id: uuidv4(), name: 'S03E01/report-keywords', sessionId: uuidv4()});
     const reportKeywords: Array<{ [key: string]: string }> = [];
 
-    console.log('Generating keywords for reports...');
     for (const report of reports) {
         const keywordsFromCache = await getContentFromCache(report.filename);
         if (keywordsFromCache) {
@@ -200,13 +199,13 @@ async function generateReportKeywords(trace: LangfuseTraceClient, facts: string[
         }) as OpenAI.Chat.Completions.ChatCompletion;
         
         expenseCounter.increaseCost(response);
-
+        langfuseService.finalizeGeneration(generation, response, response.model, {
+            promptTokens: response.usage?.prompt_tokens,
+            completionTokens: response.usage?.completion_tokens,
+            totalTokens: response.usage?.total_tokens
+        });
+        
         if ('choices' in response && response.choices[0]?.message?.content) {
-            langfuseService.finalizeGeneration(generation, response.choices[0].message, response.model, {
-                promptTokens: response.usage?.prompt_tokens,
-                completionTokens: response.usage?.completion_tokens,
-                totalTokens: response.usage?.total_tokens
-            });
             return response.choices[0].message.content;
         }
         throw new Error('Unexpected response format from OpenAI');
