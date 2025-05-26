@@ -7,6 +7,7 @@ import { ExpenseCounter } from '../shared/ExpenseCounter';
 import { LangfuseService } from '../shared/LangfuseService';
 import { LangfuseTraceClient } from 'langfuse';
 import { v4 as uuidv4 } from 'uuid';
+import type OpenAI from 'openai';
 
 const requestService = new RequestService();
 const openAIService = new OpenAIService();
@@ -24,11 +25,6 @@ keyword1, keyword2, keyword3, ...
 <facts>
 {{facts}}
 </facts>
-
-<report>
-{{report_name}}
-{{report_content}}
-</report>
 `
 
 interface OpenAIResponse {
@@ -94,6 +90,7 @@ async function generateKeywordsForReports(facts: string[], reports: Array<{ file
             [report.filename]: await generateKeywords(trace, facts, report)
         });
     }
+    await langfuseService.flushAsync();
     return JSON.stringify(Object.assign({}, ...reportKeywords));
 }
 
@@ -106,17 +103,28 @@ async function generateKeywords(trace: LangfuseTraceClient, facts: string[], rep
     });
 
     const factsText = facts.join('\n');
-    const filledPrompt = prompt
+    const filledFactsPrompt = prompt
         .replace('{{facts}}', factsText)
-        .replace('{{report_name}}', report.filename)
-        .replace('{{report_content}}', report.content);
+
+        const reportPrompt = `
+        <report>
+        ${report.filename}
+        ${report.content}
+        </report>
+        `
 
     try {
         const response = await openAIService.completion({
-            messages: [{ role: 'user', content: filledPrompt }],
+            messages: [
+                { role: 'system', content: filledFactsPrompt }, 
+                { role: 'user', content: reportPrompt }
+            ],
             model: 'gpt-4o',
             stream: false
-        });
+        }) as OpenAI.Chat.Completions.ChatCompletion;
+        
+        expenseCounter.increaseCost(response);
+
         if ('choices' in response && response.choices[0]?.message?.content) {
             langfuseService.finalizeGeneration(generation, response.choices[0].message, response.model, {
                 promptTokens: response.usage?.prompt_tokens,
@@ -150,6 +158,8 @@ async function main() {
     console.log('Keywords map:', keywordsMap);
     const headquartersResponse = await headquartersService.report('dokumenty', JSON.parse(keywordsMap));
     console.log('Headquarters response:', headquartersResponse);
+
+    console.log("Used tokens: " + JSON.stringify(expenseCounter.getUsedTokens()));
 }
 
 await main();
