@@ -8,7 +8,6 @@ import { LangfuseService } from '../shared/LangfuseService';
 import { LangfuseTraceClient } from 'langfuse';
 import { v4 as uuidv4 } from 'uuid';
 import type OpenAI from 'openai';
-import { directions } from '@googlemaps/google-maps-services-js/dist/directions';
 
 const requestService = new RequestService();
 const openAIService = new OpenAIService();
@@ -17,7 +16,7 @@ const expenseCounter = new ExpenseCounter();
 const langfuseService = new LangfuseService();
 
 const factsKeywordsPrompt = `
-Provide a summary of the given facts, extract key information like: person's identity, occupation, name of technology the person is familiar with.
+Read the following facts and prepare a summary of the most important information.
 `
 
 const reportKeywordsPrompt = `
@@ -30,10 +29,12 @@ Keywords MUST BE in Polish language.
 Keywords MUST BE in nominative case (e.g 'nauczyciel', 'programista, NOT 'nauczyciela', 'programistów')
 Keyword list should precisely describe the report, taking into account report content, related facts and information from the filename.
 If the report is about a person, find related facts about this person, their occupation, skills, etc and use them to generate keywords.
+Be precise in reading filename. If the filename is report-00-sektor-C4.txt, the keyword should be 'sektor C4' not 'sektor C'.
 
 <Examples>
 If the report mentions about 'Adam Kowalski' and there is a fact about 'Adam Kowalski' being a teacher, one of the keywords should be 'nauczyciel'.
 If the report mentions about 'Barbara Nowak' and there is a fact about 'Barbara Nowak' being a programmer, one of the keywords should be 'programista'.
+If the report mentions about 'Barbara Nowak' and there is a fact about 'Barbara Nowak' knows 'JavaScript', one of the keywords should be 'JavaScript'.
 </Examples>
 
 There is no limitation on the number of keywords.
@@ -88,7 +89,7 @@ async function generateFactSummary(trace: LangfuseTraceClient, fact: { filename:
                 { role: 'system', content: factsKeywordsPrompt },
                 { role: 'user', content: fact.content }
             ],
-            model: 'gpt-4',
+            model: 'gpt-4o',
             stream: false
         }) as OpenAI.Chat.Completions.ChatCompletion;
         
