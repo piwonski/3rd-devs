@@ -16,15 +16,16 @@ const expenseCounter = new ExpenseCounter();
 const langfuseService = new LangfuseService();
 
 const prompt = `
-You are an assistant specialized in preparing keywords for reports
-You will be given a file with facts about a company.
-Based on the facts, you will prepare a list of keywords for the given report.
-The keywords should be in the following format:
+You need to analyze given facts, extract key information and use this information to prepare a list of keywords for the given report.
+Identify key information from the report: what happened, where and who was involved, which items and technologies were described.
+Find facts related to the analysed report. The most often link will be people mentioned in the report and in the facts.
+Use also the report name while preparing the list of keywords. Not necesarily as a one of the keywords, but as a context for the keywords.
+Keywords MUST BE in Polish language.
+Keywords MUST BE in nominative case (e.g 'nauczyciel', 'programista, NOT 'nauczyciela', 'programistów')
+Keyword list should precisely describe the report, taking into account report content, related facts and information from the filename
+There is no limitation on the number of keywords.
+The list of keywords should be in the following format:
 keyword1, keyword2, keyword3, ...
-
-<facts>
-{{facts}}
-</facts>
 `
 
 interface OpenAIResponse {
@@ -64,8 +65,8 @@ async function readReports(): Promise<Array<{ filename: string; content: string 
     return reports;
 }
 
-async function getKeywordsFromCache(): Promise<string | null> {
-    const cacheFile = join(__dirname, 'cache', 'keywords.json');
+async function getKeywordsFromCache(filename: string): Promise<string | null> {
+    const cacheFile = join(__dirname, 'cache', filename);
     try {
         const keywords = await readFile(cacheFile, 'utf-8');
         console.log('Keywords found in cache');
@@ -75,21 +76,34 @@ async function getKeywordsFromCache(): Promise<string | null> {
     }
 }
 
-async function saveKeywordsToCache(keywords: string): Promise<void> {
+async function saveKeywordsToCache(keywords: string, filename: string): Promise<void> {
     const cacheDir = join(__dirname, 'cache');
     await mkdir(cacheDir, { recursive: true });
-    await writeFile(join(cacheDir, 'keywords.json'), keywords, 'utf-8');
+    await writeFile(join(cacheDir, filename), keywords, 'utf-8');
 }
 
 async function generateKeywordsForReports(facts: string[], reports: Array<{ filename: string; content: string }>): Promise<string> {
     const trace = langfuseService.createTrace({id: uuidv4(), name: 'S03E01', sessionId: uuidv4()});
 
-    const reportKeywords = [];
+    const reportKeywords: Array<{ [key: string]: string }> = [];
+
     for (const report of reports) {
-        reportKeywords.push({
-            [report.filename]: await generateKeywords(trace, facts, report)
-        });
+        const keywordsFromCache = await getKeywordsFromCache(report.filename);
+        if (keywordsFromCache) {
+            console.log(`Keywords for ${report.filename} found in cache: ${keywordsFromCache}`);
+            reportKeywords.push({
+                [report.filename]: keywordsFromCache
+            });
+        } else {
+            const keywords = await generateKeywords(trace, facts, report);
+            console.log(`Keywords for ${report.filename} generated: ${keywords}`);
+            reportKeywords.push({
+                [report.filename]: keywords
+            });
+            await saveKeywordsToCache(keywords, report.filename);
+        }
     }
+
     await langfuseService.flushAsync();
     return JSON.stringify(Object.assign({}, ...reportKeywords));
 }
@@ -98,25 +112,30 @@ async function generateKeywords(trace: LangfuseTraceClient, facts: string[], rep
     console.log(`Generating keywords for ${report.filename}...`);
 
     const generation = langfuseService.createGeneration(trace, 'generate-keywords', {
+        prompt,
         report_name: report.filename,
         report_content: report.content
     });
 
-    const factsText = facts.join('\n');
-    const filledFactsPrompt = prompt
-        .replace('{{facts}}', factsText)
+    const factsText = facts.join('\n\n');
+    const factsPrompt = `
+        <facts>
+        ${factsText}
+        </facts>
+    `
 
-        const reportPrompt = `
+    const reportPrompt = `
         <report>
         ${report.filename}
         ${report.content}
         </report>
-        `
+    `
 
     try {
         const response = await openAIService.completion({
             messages: [
-                { role: 'system', content: filledFactsPrompt }, 
+                { role: 'system', content: prompt },
+                { role: 'system', content: factsPrompt }, 
                 { role: 'user', content: reportPrompt }
             ],
             model: 'gpt-4o',
@@ -147,15 +166,14 @@ async function main() {
     const reports = await readReports();
     console.log('Number of reports:', reports.length);
     
-    let keywordsMap = await getKeywordsFromCache();
+    let keywordsMap = await getKeywordsFromCache('keywords.json');
     if (!keywordsMap) {
         console.log('Generating keywords for reports...');
         keywordsMap = await generateKeywordsForReports(facts, reports);
-        await saveKeywordsToCache(keywordsMap);
+        await saveKeywordsToCache(keywordsMap, 'keywords.json');
 
     }
 
-    console.log('Keywords map:', keywordsMap);
     const headquartersResponse = await headquartersService.report('dokumenty', JSON.parse(keywordsMap));
     console.log('Headquarters response:', headquartersResponse);
 
