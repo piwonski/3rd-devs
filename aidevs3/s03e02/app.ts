@@ -18,8 +18,8 @@ const vectorService = new VectorService(openAIService, cacheDir);
 const textSplitter = new TextSplitter();
 
 function extractDateFromFilename(filename: string): string | null {
-    const dateMatch = filename.match(/^(\d{4}-\d{2}-\d{2})_/);
-    return dateMatch ? dateMatch[1] : null;
+    const dateMatch = filename.match(/^(\d{4})[-_](\d{2})[-_](\d{2})/);
+    return dateMatch ? `${dateMatch[1]}-${dateMatch[2]}-${dateMatch[3]}` : null;
 }
 
 async function main() {
@@ -37,6 +37,17 @@ async function main() {
     }
     await vectorService.ensureCollection('factory_data');
 
+    if (await vectorService.getCount('factory_data') === 0) {
+        await insertVectors();
+    }
+
+    const query = 'W raporcie, z którego dnia znajduje się wzmianka o kradzieży prototypu broni?';
+    const embedding = await openAIService.createEmbedding(query);
+    const results = await vectorService.performSearch('factory_data', query, {}, 1);
+    console.log('Results: ', results);
+}
+
+async function insertVectors() {
     const weaponReports = await cacheService.listFiles('weapons_tests', 'do-not-share');
     const docs = (await Promise.all(weaponReports.map(async (reportFileName) => {
         const date = extractDateFromFilename(reportFileName);
@@ -45,8 +56,7 @@ async function main() {
             console.error('Could not read report file: ', reportFileName);
             return null;
         }
-        const result = await textSplitter.document(reportContent, 'gpt-4o', { date, filename: reportFileName});
-        return result;
+        return await textSplitter.document(reportContent, 'gpt-4o', {date, filename: reportFileName});
     }))).filter((doc): doc is IDoc => doc !== null);
 
     console.log('Adding points to factory_data...');

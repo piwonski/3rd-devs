@@ -70,6 +70,10 @@ export class VectorService {
     });
   }
 
+  async getCount(collectionName: string) {
+    return (await this.client.count(collectionName)).count;
+  }
+
   async performSearch(collectionName: string, query: string, filter: Record<string, any> = {}, limit: number = 5) {
     const queryEmbedding = await this.openAIService.createEmbedding(query);
     return this.client.search(collectionName, {
