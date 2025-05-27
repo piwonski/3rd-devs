@@ -11,6 +11,10 @@ export class Environment {
         return this.getEnvironmentVariable("GROQ_API_KEY");
     }
 
+    public static getFilesFromFactoryZipPassword(): string {
+        return this.getEnvironmentVariable("FILES_FROM_FACTORY_ZIP_PASSWORD");
+    }
+
     private static getEnvironmentVariable(name: string): string {
         const value = process.env[name];
         if (!value) {
