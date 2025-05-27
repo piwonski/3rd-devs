@@ -7,6 +7,8 @@ import { VectorService } from '../shared/VectorService';
 import { TextSplitter } from '../shared/TextSplitter';
 import type { IDoc } from '../shared/TextSplitter';
 import { CacheService } from '../shared/CacheService';
+import { HeadquartersService } from '../shared/HeadquartersService';
+import { RequestService } from '../shared/RequestService';
 
 const cacheDir = path.join(__dirname, 'cache');
 const downloadService = new DownloadService(cacheDir);
@@ -16,6 +18,9 @@ const cacheService = new CacheService(cacheDir);
 const openAIService = new OpenAIService();
 const vectorService = new VectorService(openAIService, cacheDir);
 const textSplitter = new TextSplitter();
+
+const requestService = new RequestService();
+const headquartersService = new HeadquartersService(requestService);
 
 function extractDateFromFilename(filename: string): string | null {
     const dateMatch = filename.match(/^(\d{4})[-_](\d{2})[-_](\d{2})/);
@@ -42,9 +47,18 @@ async function main() {
     }
 
     const query = 'W raporcie, z którego dnia znajduje się wzmianka o kradzieży prototypu broni?';
-    const embedding = await openAIService.createEmbedding(query);
+    console.log('\n\n', query, '\n\n');
+
     const results = await vectorService.performSearch('factory_data', query, {}, 1);
     console.log('Results: ', results);
+
+    if (results?.[0]?.payload?.date) {
+        const date = results[0].payload.date as string;
+        const headquartersAnswer = await headquartersService.report('wektory', date);
+        console.log('Answer: ', headquartersAnswer);
+    } else {
+        console.log('No results found');
+    }
 }
 
 async function insertVectors() {
