@@ -67,11 +67,11 @@ export class CacheService {
 
     /**
      * Checks if a file exists in the cache
-     * @param filename The name of the file to check
+     * @param paths Path segments to join and check (e.g. ['dir', 'subdir', 'file.txt'])
      * @returns true if the file exists, false otherwise
      */
-    async fileExists(filename: string): Promise<boolean> {
-        const filePath = path.join(this.cacheDir, filename);
+    async fileExists(...paths: string[]): Promise<boolean> {
+        const filePath = path.join(this.cacheDir, ...paths);
         try {
             await fs.access(filePath);
             return true;

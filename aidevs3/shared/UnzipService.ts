@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import * as unzipper from 'unzipper';
+import Seven from 'node-7z';
 
 export class UnzipService {
     private cacheDir: string;
@@ -9,40 +9,32 @@ export class UnzipService {
         this.cacheDir = cacheDir;
     }
 
-    async unzipFile(zipFilePath: string, password: string): Promise<void> {
+    async unzipFile({ zipPaths, password }: { zipPaths: string[]; password?: string }): Promise<void> {
         try {
-            console.log('Unzipping file...');
-            const zipFile = path.join(this.cacheDir, zipFilePath);
-            const zipFileName = path.basename(zipFilePath, '.zip');
+            const zipFile = path.join(this.cacheDir, ...zipPaths);
+            const zipFileName = path.basename(zipPaths[zipPaths.length - 1], '.zip');
             const extractDir = path.join(this.cacheDir, zipFileName);
+            console.log(`Unzipping file... ${zipFile}`);
             
             await fs.promises.mkdir(extractDir, { recursive: true });
             
-            await new Promise((resolve, reject) => {
-                fs.createReadStream(zipFile)
-                    .pipe(unzipper.Parse({ password } as any))
-                    .on('entry', async (entry: unzipper.Entry) => {
-                        const filePath = path.join(extractDir, entry.path);
-                        
-                        if (entry.path.endsWith('/')) {
-                            // Create directory
-                            await fs.promises.mkdir(filePath, { recursive: true });
-                            entry.autodrain();
-                        } else {
-                            // Ensure parent directory exists
-                            await fs.promises.mkdir(path.dirname(filePath), { recursive: true });
-                            // Write file
-                            entry.pipe(fs.createWriteStream(filePath));
-                        }
-                    })
-                    .on('close', () => {
-                        console.log('Unzip completed successfully!');
-                        resolve(undefined);
-                    })
-                    .on('error', (err) => {
-                        console.error('Error unzipping file:', err);
-                        reject(err);
-                    });
+            await new Promise<void>((resolve, reject) => {
+                const options = ['x', zipFile, `-o${extractDir}`];
+                if (password) {
+                    options.push(`-p${password}`);
+                }
+                
+                const seven = Seven.extractFull(zipFile, extractDir, {
+                    password,
+                    recursive: true
+                });
+                
+                seven.on('end', () => {
+                    console.log('Unzip completed successfully!');
+                    resolve();
+                });
+                
+                seven.on('error', reject);
             });
         } catch (error) {
             console.error('Error in unzipFile:', error);
