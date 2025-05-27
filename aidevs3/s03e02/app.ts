@@ -5,20 +5,25 @@ import { Environment } from '../shared/Environment';
 import { OpenAIService } from '../shared/OpenAIService';
 import { VectorService } from '../shared/VectorService';
 import { TextSplitter } from '../shared/TextSplitter';
+import { CacheService } from '../shared/CacheService';
 
 const cacheDir = path.join(__dirname, 'cache');
 const downloadService = new DownloadService(cacheDir);
 const unzipService = new UnzipService(cacheDir);
+const cacheService = new CacheService(cacheDir);
+
 const openAIService = new OpenAIService();
 const vectorService = new VectorService(openAIService);
 const textSplitter = new TextSplitter();
 
 async function main() {
-    const zipUrl = `${Environment.getHeadquartersHost()}/dane/pliki_z_fabryki.zip`;
-    const zipFileName = 'pliki_z_fabryki.zip';
+    if (!await cacheService.fileExists('pliki_z_fabryki.zip')) {
+        const zipUrl = `${Environment.getHeadquartersHost()}/dane/pliki_z_fabryki.zip`;
+        const zipFileName = 'pliki_z_fabryki.zip';
 
-    await downloadService.downloadFile(zipUrl, zipFileName);
-    await unzipService.unzipFile(zipFileName, Environment.getFilesFromFactoryZipPassword());
+        await downloadService.downloadFile(zipUrl, zipFileName);
+        await unzipService.unzipFile(zipFileName, Environment.getFilesFromFactoryZipPassword());
+    }
 
     await vectorService.ensureCollection('factory_data');
 }
