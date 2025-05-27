@@ -4,16 +4,19 @@ import type { ChatCompletionContentPart } from "openai/resources/chat/completion
 import Groq from "groq-sdk";
 import { Environment } from "./Environment";
 import fs from "fs";
+import type {CreateEmbeddingResponse} from "openai/resources/embeddings";
 
 export class OpenAIService {
   private openai: OpenAI;
   private groq: Groq;
+  private embeddingDimensions: number;
 
-  constructor() {
+  constructor(embeddingDimensions: number = 3072) {
     this.openai = new OpenAI();
     this.groq = new Groq({
       apiKey: Environment.getGroqApiKey()
     });
+    this.embeddingDimensions = embeddingDimensions;
   }
 
   async completion(config: {
@@ -139,9 +142,9 @@ export class OpenAIService {
 
       try {
         const result = JSON.parse(response.choices[0].message.content || '{}');
-        return { 
-          name: imageName, 
-          preview: result.preview || '' 
+        return {
+          name: imageName,
+          preview: result.preview || ''
         };
       } catch (parseError) {
         console.error('Error parsing JSON response:', parseError);
@@ -155,6 +158,24 @@ export class OpenAIService {
       console.error('Error processing image:', error);
       throw error;
     }
+  }
+
+  async createEmbedding(text: string): Promise<number[]> {
+    try {
+      const response: CreateEmbeddingResponse = await this.openai.embeddings.create({
+        model: "text-embedding-3-large",
+        input: text,
+        dimensions: this.embeddingDimensions,
+      });
+      return response.data[0].embedding;
+    } catch (error) {
+      console.error("Error creating embedding:", error);
+      throw error;
+    }
+  }
+
+  getEmbeddingDimensions(): number {
+    return this.embeddingDimensions;
   }
 }
 
