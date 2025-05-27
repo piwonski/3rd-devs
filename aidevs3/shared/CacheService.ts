@@ -25,8 +25,8 @@ export class CacheService {
      * @param filename The name of the file to read
      * @returns The file contents as a string, or null if the file doesn't exist
      */
-    async readFile(filename: string): Promise<string | null> {
-        const filePath = path.join(this.cacheDir, filename);
+    async readFile(...paths: string[]): Promise<string | null> {
+        const filePath = path.join(this.cacheDir, ...paths);
         try {
             return await fs.readFile(filePath, 'utf-8');
         } catch (error) {
@@ -56,9 +56,10 @@ export class CacheService {
      * Lists all files in the cache directory
      * @returns Array of filenames in the cache directory
      */
-    async listFiles(): Promise<string[]> {
+    async listFiles(...paths: string[]): Promise<string[]> {
+        const dirPath = path.join(this.cacheDir, ...paths);
         try {
-            return await fs.readdir(this.cacheDir);
+            return await fs.readdir(dirPath);
         } catch (error) {
             console.error('Error listing cache files:', error);
             throw error;

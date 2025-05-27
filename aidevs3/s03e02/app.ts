@@ -16,6 +16,11 @@ const openAIService = new OpenAIService();
 const vectorService = new VectorService(openAIService);
 const textSplitter = new TextSplitter();
 
+function extractDateFromFilename(filename: string): string | null {
+    const dateMatch = filename.match(/^(\d{4}-\d{2}-\d{2})_/);
+    return dateMatch ? dateMatch[1] : null;
+}
+
 async function main() {
     const password = Environment.getFilesFromFactoryZipPassword();
     if (!await cacheService.fileExists('pliki_z_fabryki.zip')) {
@@ -29,8 +34,20 @@ async function main() {
     if (!await cacheService.fileExists('weapons_tests', 'do-not-share')) {
         await unzipService.unzipFile({ zipPaths: ['pliki_z_fabryki', 'weapons_tests.zip'], password });
     }
-
     await vectorService.ensureCollection('factory_data');
+
+    const weaponReports = await cacheService.listFiles('weapons_tests', 'do-not-share');
+    const docs = await Promise.all(weaponReports.map(async (reportFileName) => {
+        const date = extractDateFromFilename(reportFileName);
+        const reportContent = await cacheService.readFile('weapons_tests', 'do-not-share', reportFileName);
+        if (!reportContent) {
+            console.error('Could not read report file: ', reportFileName);
+            return null;
+        }
+        const result = await textSplitter.document(reportContent, 'gpt-4o', { date, filename: reportFileName});
+        return result;
+    }));
+    
 }
 
 await main();
