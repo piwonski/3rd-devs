@@ -8,14 +8,16 @@ export class VectorService {
   private client: QdrantClient;
   private openAIService: OpenAIService;
   private dimensions: number;
+  private directory: string;
 
-  constructor(openAIService: OpenAIService) {
+  constructor(openAIService: OpenAIService, directory: string = __dirname) {
     this.dimensions = openAIService.getEmbeddingDimensions();
     this.client = new QdrantClient({
       url: process.env.QDRANT_URL,
       apiKey: process.env.QDRANT_API_KEY,
     });
     this.openAIService = openAIService;
+    this.directory = directory;
   }
 
   async ensureCollection(name: string) {
@@ -58,7 +60,8 @@ export class VectorService {
       };
     }));
 
-    const pointsFilePath = path.join(__dirname, 'points.json');
+    
+    const pointsFilePath = path.join(this.directory, 'points.json');
     await fs.writeFile(pointsFilePath, JSON.stringify(pointsToUpsert, null, 2));
 
     await this.client.upsert(collectionName, {

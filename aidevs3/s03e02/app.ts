@@ -5,6 +5,7 @@ import { Environment } from '../shared/Environment';
 import { OpenAIService } from '../shared/OpenAIService';
 import { VectorService } from '../shared/VectorService';
 import { TextSplitter } from '../shared/TextSplitter';
+import type { IDoc } from '../shared/TextSplitter';
 import { CacheService } from '../shared/CacheService';
 
 const cacheDir = path.join(__dirname, 'cache');
@@ -13,7 +14,7 @@ const unzipService = new UnzipService(cacheDir);
 const cacheService = new CacheService(cacheDir);
 
 const openAIService = new OpenAIService();
-const vectorService = new VectorService(openAIService);
+const vectorService = new VectorService(openAIService, cacheDir);
 const textSplitter = new TextSplitter();
 
 function extractDateFromFilename(filename: string): string | null {
@@ -37,7 +38,7 @@ async function main() {
     await vectorService.ensureCollection('factory_data');
 
     const weaponReports = await cacheService.listFiles('weapons_tests', 'do-not-share');
-    const docs = await Promise.all(weaponReports.map(async (reportFileName) => {
+    const docs = (await Promise.all(weaponReports.map(async (reportFileName) => {
         const date = extractDateFromFilename(reportFileName);
         const reportContent = await cacheService.readFile('weapons_tests', 'do-not-share', reportFileName);
         if (!reportContent) {
@@ -46,8 +47,11 @@ async function main() {
         }
         const result = await textSplitter.document(reportContent, 'gpt-4o', { date, filename: reportFileName});
         return result;
-    }));
-    
+    }))).filter((doc): doc is IDoc => doc !== null);
+
+    console.log('Adding points to factory_data...');
+    await vectorService.addPoints('factory_data', docs);
+    console.log('Completed. Added ', docs.length, ' points.');
 }
 
 await main();
