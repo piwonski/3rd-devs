@@ -25,7 +25,7 @@ export class OpenAIService {
     stream?: boolean,
     jsonMode?: boolean
   }): Promise<OpenAI.Chat.Completions.ChatCompletion | AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>> {
-    const { messages, model = "gpt-4o", stream = false, jsonMode = false } = config;
+    const { messages, model = "gpt-4.1", stream = false, jsonMode = false } = config;
     try {
       const chatCompletion = await this.openai.chat.completions.create({
         messages,

@@ -19,3 +19,13 @@ export interface HeadquartersResponse {
     code: number;
     message: string;
 }
+
+export interface LoopApiBody {
+    apikey: string;
+    query: string;       
+}
+
+export interface LoopApiResponse {
+    code: number;
+    message: string;
+}

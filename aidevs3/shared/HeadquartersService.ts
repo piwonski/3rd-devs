@@ -1,6 +1,6 @@
 import { Environment } from './Environment';
 import { RequestService } from './RequestService';
-import type {ReportBody, HeadquartersResponse, QueryResponse, QueryBody} from "./sharedTypes.ts";
+import type {ReportBody, HeadquartersResponse, QueryResponse, QueryBody, LoopApiBody, LoopApiResponse} from "./sharedTypes.ts";
 
 export class HeadquartersService {
     private readonly requestService: RequestService;
@@ -27,6 +27,18 @@ export class HeadquartersService {
 
     async getArxivQuestions(): Promise<string> {
         return this.requestService.getText(`${this.getApiKeyDataPath()}/arxiv.txt`);
+    }
+
+    async getBarbaraData(): Promise<string> {
+        return this.requestService.getText(`${this.host}/dane/barbara.txt`);
+    }
+
+    async queryPeople(query: string): Promise<LoopApiResponse> {
+        return this.requestService.post<LoopApiBody, LoopApiResponse>(`${this.host}/people`, { apikey: this.apiKey, query });
+    }
+
+    async queryPlaces(query: string): Promise<LoopApiResponse> {
+        return this.requestService.post<LoopApiBody, LoopApiResponse>(`${this.host}/places`, { apikey: this.apiKey, query });
     }
 
     report<ANSWER>(task: string, answer: ANSWER) {

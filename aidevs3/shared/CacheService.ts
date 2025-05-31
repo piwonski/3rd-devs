@@ -107,4 +107,20 @@ export class CacheService {
             throw error;
         }
     }
+
+    /**
+     * Gets data from cache or fetches it using the provided callback
+     * @param filename The name of the file to read/fetch
+     * @param fetchCallback Callback function to fetch data if not in cache
+     * @returns The file contents as a string
+     */
+    async getOrFetch(filename: string, fetchCallback: () => Promise<string>): Promise<string> {
+        const cachedData = await this.readFile(filename);
+        if (cachedData) {
+            return cachedData;
+        }
+        const freshData = await fetchCallback();
+        await this.writeFile(filename, freshData);
+        return freshData;
+    }
 } 

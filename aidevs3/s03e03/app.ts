@@ -83,7 +83,7 @@ async function main() {
     console.log('Users table structure:', usersStructure, '\n');
     console.log('Datacenter table structure:', datacenterStructure, '\n');
 
-    const trace = langfuseService.createTrace({id: uuidv4(), name: 'S03E01/facts-summaries', sessionId: uuidv4()});
+    const trace = langfuseService.createTrace({id: uuidv4(), name: 'S03E03', sessionId: uuidv4()});
     
     const createUsersTableQuery = await findCreateTableQuery(trace, usersStructure);
     const createDatacentersTableQuery = await findCreateTableQuery(trace, datacenterStructure);
