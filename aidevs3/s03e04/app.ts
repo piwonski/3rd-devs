@@ -114,6 +114,80 @@ async function findBarbara(names: string[], cities: string[], wrongCities: Set<s
     return barbaraLocation;
 }
 
+async function findFlag(names: string[], cities: string[]) {
+    const visitedNames = new Set<string>();
+    const visitedCities = new Set<string>();
+    const nameQueue = [...names];
+    const cityQueue = [...cities];
+    const allPeople = new Set<string>();
+    const allPlaces = new Set<string>();
+
+    while (nameQueue.length > 0 || cityQueue.length > 0) {
+        // Process names queue
+        if (nameQueue.length > 0) {
+            const currentName = nameQueue.shift()!;
+            if (!visitedNames.has(currentName)) {
+                visitedNames.add(currentName);
+                allPeople.add(currentName);
+                console.log(`Querying people API for: ${currentName}`);
+                const response = await headquartersService.queryPeople(currentName);
+
+                console.log('Places for person ', currentName, ':', response);
+
+                const newPlaces = response.code === 0 && response.message !== '[**RESTRICTED DATA**]' 
+                    ? response.message
+                        .split(' ')
+                        .map(place => place.trim())
+                        .filter(place => place.length > 0)
+                    : [];
+
+                console.log('New places:', newPlaces);
+                
+                for (const place of newPlaces) {
+                    allPlaces.add(place);
+                    if (!visitedCities.has(place)) {
+                        cityQueue.push(place);
+                    }
+                }
+            }
+        }
+
+        // Process cities queue
+        if (cityQueue.length > 0) {
+            const currentCity = cityQueue.shift()!;
+            if (!visitedCities.has(currentCity)) {
+                visitedCities.add(currentCity);
+                allPlaces.add(currentCity);
+                console.log(`Querying places API for: ${currentCity}`);
+                const response = await headquartersService.queryPlaces(currentCity);
+
+                console.log('People for city ', currentCity, ':', response, '\n');
+
+                const newPeople = response.code === 0 && response.message !== '[**RESTRICTED DATA**]'
+                    ? response.message
+                        .split(' ')
+                        .map(person => replacePolishChars(person.trim()))
+                        .filter(person => person.length > 0)
+                    : [];
+
+                console.log('New people for city ', currentCity, ':', newPeople, '\n');
+
+                for (const person of newPeople) {
+                    allPeople.add(person);
+                    if (!visitedNames.has(person)) {
+                        nameQueue.push(person);
+                    }
+                }
+            }
+        }
+    }
+
+    return {
+        people: Array.from(allPeople),
+        places: Array.from(allPlaces)
+    };
+}
+
 async function extractNamesAndCities(trace: LangfuseTraceClient, text: string) {
     return cacheService.getOrFetch('names-and-cities.json', async () => {
         const prompt = `Extract from the following text two lists:
@@ -178,6 +252,11 @@ async function main() {
     
     console.log('\nExtracted names:', names);
     console.log('\nExtracted cities:', cities);
+
+    console.log('\nSearching for all people and places...');
+    const { people, places } = await findFlag(names, cities);
+    console.log('\nAll people found:', people);
+    console.log('\nAll places found:', places);
 
     const wrongCities = new Set<string>();
     let barbaraLocation: string | null = null;
