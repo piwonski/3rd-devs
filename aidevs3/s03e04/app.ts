@@ -21,6 +21,28 @@ const cacheService = new CacheService(cacheDir);
 // Initialize cache directory
 await cacheService.ensureCacheDirectory();
 
+function replacePolishChars(text: string): string {
+    return text
+        .replace(/ą/g, 'a')
+        .replace(/ć/g, 'c')
+        .replace(/ę/g, 'e')
+        .replace(/ł/g, 'l')
+        .replace(/ń/g, 'n')
+        .replace(/ó/g, 'o')
+        .replace(/ś/g, 's')
+        .replace(/ź/g, 'z')
+        .replace(/ż/g, 'z')
+        .replace(/Ą/g, 'A')
+        .replace(/Ć/g, 'C')
+        .replace(/Ę/g, 'E')
+        .replace(/Ł/g, 'L')
+        .replace(/Ń/g, 'N')
+        .replace(/Ó/g, 'O')
+        .replace(/Ś/g, 'S')
+        .replace(/Ź/g, 'Z')
+        .replace(/Ż/g, 'Z');
+}
+
 async function findBarbara(names: string[], cities: string[], wrongCities: Set<string> = new Set()) {
     const visitedNames = new Set<string>();
     const visitedCities = new Set<string>();
@@ -39,12 +61,12 @@ async function findBarbara(names: string[], cities: string[], wrongCities: Set<s
 
                 console.log('Places for person ', currentName, ':', response);
 
-                const newPlaces = response.message === '[**RESTRICTED DATA**]' 
-                    ? []
-                    : response.message
+                const newPlaces = response.code === 0 && response.message !== '[**RESTRICTED DATA**]' 
+                    ? response.message
                         .split(' ')
                         .map(place => place.trim())
-                        .filter(place => place.length > 0);
+                        .filter(place => place.length > 0)
+                    : [];
 
                 console.log('New places:', newPlaces);
                 
@@ -66,7 +88,12 @@ async function findBarbara(names: string[], cities: string[], wrongCities: Set<s
 
                 console.log('People for city ', currentCity, ':', response, '\n');
 
-                const newPeople = response.message.split(' ').map(person => person.trim()).filter(person => person.length > 0);
+                const newPeople = response.code === 0 && response.message !== '[**RESTRICTED DATA**]'
+                    ? response.message
+                        .split(' ')
+                        .map(person => replacePolishChars(person.trim()))
+                        .filter(person => person.length > 0)
+                    : [];
 
                 console.log('New people for city ', currentCity, ':', newPeople, '\n');
                 
