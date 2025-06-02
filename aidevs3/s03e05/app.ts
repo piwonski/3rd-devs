@@ -128,9 +128,46 @@ async function initializeNeo4j() {
     await createGraphConnections(connections, userIdToNeo4jNode);
 }
 
+async function findShortestPath(fromUsername: string, toUsername: string): Promise<string[]> {
+    const result = await neo4jService.executeQuery(`
+        MATCH (from:User {username: $fromUsername}), (to:User {username: $toUsername})
+        CALL {
+            WITH from, to
+            MATCH path = shortestPath((from)-[:KNOWS*]->(to))
+            RETURN path
+        }
+        RETURN path
+    `, {
+        fromUsername,
+        toUsername
+    });
+
+    if (result.records.length === 0) {
+        console.log(`No path found between ${fromUsername} and ${toUsername}`);
+        return [];
+    }
+
+    const path = result.records[0].get('path');
+    const nodes = path.segments.map((segment: any) => segment.start.properties.username);
+    nodes.push(path.end.properties.username);
+    
+    console.log(`Shortest path from ${fromUsername} to ${toUsername}:`);
+    console.log(nodes.join(' -> '));
+    
+    return nodes;
+}
+
 async function main() {
     try {
         await initializeNeo4j();
+        const path = await findShortestPath('Rafał', 'Barbara');
+        
+        if (path.length > 0) {
+            const answer = path.join(',');
+            console.log('Reporting answer to headquarters:', answer);
+            const response = await headquartersService.report('connections', answer);
+            console.log('Headquarters response:', response);
+        }
     } finally {
         await neo4jService.close();
     }
