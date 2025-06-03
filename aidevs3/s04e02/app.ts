@@ -16,13 +16,16 @@ const openAIService = new OpenAIService();
 const langfuseService = new LangfuseService();
 
 async function validateWords(entry: string, trace: LangfuseTraceClient): Promise<boolean> {
+    console.log('Validating entry:', entry);
     const generation = langfuseService.createGeneration(trace, 'validate-words', {
         words: entry
     });
 
+    const model = 'ft:gpt-4.1-mini-2025-04-14:wojciech-piwonski:aidevs-research:BeL9iEaJ'
+
     try {
         const completion = await openAIService.completion({
-            model: 'gpt-4.1-mini-2025-04-14:aidevs-research',
+            model,
             messages: [
                 {
                     role: 'system',
@@ -52,12 +55,13 @@ async function validateWords(entry: string, trace: LangfuseTraceClient): Promise
             throw new Error(`Invalid response format: ${response}. Expected 1 or 0.`);
         }
 
+        console.log(`Entry ${entry} is ${response === '1' ? 'valid' : 'invalid'}`);
         return response === '1';
     } catch (error) {
         langfuseService.finalizeGeneration(
             generation,
             { error: error instanceof Error ? error.message : 'Unknown error' },
-            'gpt-4.1-mini-2025-04-14:aidevs-research'
+            model
         );
         throw error;
     }
@@ -92,7 +96,7 @@ async function main() {
             .map(result => result.id);
 
         // Report valid entries
-        const headquartersResponse = await headquartersService.report('verify', validEntryIds);
+        const headquartersResponse = await headquartersService.report('research', validEntryIds);
         console.log('Headquarters response:', headquartersResponse);
 
         console.log("Used tokens:", JSON.stringify(expenseCounter.getUsedTokens()));
