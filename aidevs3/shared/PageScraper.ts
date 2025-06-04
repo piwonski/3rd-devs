@@ -67,15 +67,13 @@ export class PageScraper {
         comments.forEach(comment => comment.remove());
 
         // Get the cleaned HTML and remove any remaining JS-style comments
-        const cleanedHtml = document.body.innerHTML
-            .replace(/\/\/-->/g, '')          // Remove JS-style comment endings
-            .replace(/\/\/.*$/gm, '')         // Remove single-line JS comments
-            .replace(/\n\s*\n/g, '\n')        // Remove multiple empty lines
-            .trim();                          // Remove leading/trailing whitespace
+        const cleanedHtml = document.documentElement.outerHTML
+            // .replace(/\/\/-->/g, '')          // Remove JS-style comment endings
+            // .replace(/\/\/.*$/gm, '')         // Remove single-line JS comments
+            // .replace(/\n\s*\n/g, '\n')        // Remove multiple empty lines
+            // .trim();                          // Remove leading/trailing whitespace
 
-        // Create a new DOM to ensure proper HTML structure
-        const cleanDom = new JSDOM(cleanedHtml);
-        return cleanDom.window.document.body.innerHTML;
+        return cleanedHtml;
     }
 
     private extractLinksFromHtml(html: string, baseUrl: string): Link[] {
@@ -109,24 +107,20 @@ export class PageScraper {
             console.log('Found link:', { href, text, title, outerHTML: anchor.outerHTML });
             
             // Skip unwanted links
-            if (href.startsWith('#') || href.startsWith('javascript:')) {
+            if (href === '/' || href.startsWith('#') || href.startsWith('javascript:')) {
                 console.log('Skipping unwanted link:', href);
                 return;
             }
 
             try {
                 const fullUrl = new URL(href, baseUrl);
-                // Include links from the same domain or relative paths
-                if (fullUrl.hostname === baseUrlObj.hostname || href.startsWith('/')) {
-                    console.log('Adding valid link:', { href, text, title });
-                    links.add({ 
-                        href: fullUrl.pathname,  // Only use pathname
-                        text, 
-                        title 
-                    });
-                } else {
-                    console.log('Skipping external link:', fullUrl.toString());
-                }
+                // Include both internal and external links
+                console.log('Adding link:', { href: fullUrl.toString(), text, title });
+                links.add({ 
+                    href: fullUrl.toString(),  // Use full URL for external links
+                    text, 
+                    title 
+                });
             } catch (e) {
                 console.warn('Invalid URL:', href);
             }
@@ -139,7 +133,6 @@ export class PageScraper {
 
     async scrapePage(url: string): Promise<Page> {
         const html = await this.requestService.getText(url);
-        console.log('Raw HTML from request:', html);
         
         const links = await this.cacheService.getOrFetch(this.getCacheKey(url, 'links'), async () => {
             const extractedLinks = this.extractLinksFromHtml(html, url);
@@ -149,7 +142,6 @@ export class PageScraper {
         const cleanedHtml = await this.cacheService.getOrFetch(this.getCacheKey(url, 'html'), async () => {
             return this.cleanHtml(html);
         });
-        console.log('Cleaned HTML:', cleanedHtml);
         
         const markdown = await this.cacheService.getOrFetch(this.getCacheKey(url, 'md'), async () => {
             return this.nhm.translate(cleanedHtml);
