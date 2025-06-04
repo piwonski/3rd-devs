@@ -33,6 +33,10 @@ export class HeadquartersService {
         return this.requestService.getText(`${this.host}/dane/barbara.txt`);
     }
 
+    async getSoftoQuestions(): Promise<string> {
+        return this.requestService.getText(`${this.getApiKeyDataPath()}/softo.json`);
+    }
+
     async queryPeople(query: string): Promise<LoopApiResponse> {
         return this.requestService.post<LoopApiBody, LoopApiResponse>(`${this.host}/people`, { apikey: this.apiKey, query });
     }

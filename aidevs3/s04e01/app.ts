@@ -338,11 +338,14 @@ async function main() {
 
         const suitablePortraits: PhotoInfo[] = JSON.parse(suitablePortraitsData);
 
-        // Generate Barbara's description
-        console.log('\nGenerating Barbara\'s description...');
-        const description = await generateBarbaraDescription(suitablePortraits);
-        console.log('\nBarbara\'s description:');
-        console.log(description);
+        // Use getOrFetch to either get cached description or generate a new one
+        const description = await cacheService.getOrFetch('barbara_description.txt', async () => {
+            console.log('\nGenerating Barbara\'s description...');
+            const newDescription = await generateBarbaraDescription(suitablePortraits);
+            console.log('\nBarbara\'s description:');
+            console.log(newDescription);
+            return newDescription;
+        });
 
         // Send the description to headquarters
         const reportResponse = await headquartersService.report('photos', description);
