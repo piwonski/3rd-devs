@@ -3,6 +3,7 @@ import { PageScraper } from './PageScraper';
 import type { Page, Link } from './PageScraper';
 import { RequestService } from './RequestService';
 import { CacheService } from './CacheService';
+import { ExpenseCounter } from './ExpenseCounter';
 import type { ChatCompletionMessageParam } from 'openai/resources/chat/completions';
 import type { ChatCompletion } from 'openai/resources/chat/completions';
 
@@ -14,40 +15,29 @@ interface Question {
 export interface CrawlerResult {
     question: Question;
     answer: string;
-    visitedUrls: Set<string>;
 }
-
-export interface SupervisionContext {
-    currentUrl: string;
-    question: Question;
-    visitedUrls: Set<string>;
-    nextLink?: string;
-    answer?: string;
-}
-
-export type SupervisionCallback = (context: SupervisionContext) => Promise<boolean>;
 
 export class WebCrawler {
     private readonly pageScraper: PageScraper;
     private readonly openAIService: OpenAIService;
     private readonly baseUrl: string;
     private readonly maxDepth: number;
-    private readonly supervisionCallback?: SupervisionCallback;
+    private readonly expenseCounter: ExpenseCounter;
     private visitedUrls: Set<string> = new Set();
 
     constructor(
         requestService: RequestService,
         cacheService: CacheService,
         openAIService: OpenAIService,
+        expenseCounter: ExpenseCounter,
         baseUrl: string = 'https://softo.ag3nts.org',
-        maxDepth: number = 3,
-        supervisionCallback?: SupervisionCallback
+        maxDepth: number = 3
     ) {
         this.pageScraper = new PageScraper(requestService, cacheService);
         this.openAIService = openAIService;
         this.baseUrl = baseUrl;
         this.maxDepth = maxDepth;
-        this.supervisionCallback = supervisionCallback;
+        this.expenseCounter = expenseCounter;
     }
 
     private async checkForAnswer(page: Page, question: Question): Promise<string | null> {
@@ -64,6 +54,7 @@ export class WebCrawler {
         ];
 
         const response = await this.openAIService.completion({ messages }) as ChatCompletion;
+        this.expenseCounter.increaseCost(response);
         const answer = response.choices[0]?.message?.content?.trim() ?? null;
         
         if (!answer || answer === "NO_ANSWER") {
@@ -91,7 +82,7 @@ export class WebCrawler {
             return null;
         }
 
-        console.log('Available unvisited links on page:', page.url, unvisitedLinks);
+        console.log(`Available ${unvisitedLinks.length} unvisited links on page: ${page.url}`);
 
         const messages: ChatCompletionMessageParam[] = [
             {
@@ -127,6 +118,7 @@ Return a JSON array of objects with relevanceRate and url for each link.`
         ];
 
         const response = await this.openAIService.completion({ messages }) as ChatCompletion;
+        this.expenseCounter.increaseCost(response);
         const selectedLink = response.choices[0]?.message?.content?.trim() ?? null;
         
         if (!selectedLink) {
@@ -137,7 +129,6 @@ Return a JSON array of objects with relevanceRate and url for each link.`
         try {
             const results = JSON.parse(selectedLink);
 
-            console.log('Relevance results:', results);
             
             if (!Array.isArray(results) || results.length === 0) {
                 console.log('Invalid response format or no links evaluated');
@@ -186,23 +177,9 @@ Return a JSON array of objects with relevanceRate and url for each link.`
         // Check if we can answer the question with current page
         const answer = await this.checkForAnswer(page, question);
         if (answer) {
-            // Ask for supervision if callback is provided
-            if (this.supervisionCallback) {
-                const shouldContinue = await this.supervisionCallback({
-                    currentUrl: url,
-                    question,
-                    visitedUrls: this.visitedUrls,
-                    answer
-                });
-                if (!shouldContinue) {
-                    return null;
-                }
-            }
-
             return {
                 question,
-                answer,
-                visitedUrls: this.visitedUrls
+                answer
             };
         }
 
@@ -214,19 +191,6 @@ Return a JSON array of objects with relevanceRate and url for each link.`
 
         // Construct full URL for the next link
         const nextUrl = new URL(nextLink, this.baseUrl).toString();
-
-        // Ask for supervision if callback is provided
-        if (this.supervisionCallback) {
-            const shouldContinue = await this.supervisionCallback({
-                currentUrl: url,
-                question,
-                visitedUrls: this.visitedUrls,
-                nextLink: nextUrl
-            });
-            if (!shouldContinue) {
-                return null;
-            }
-        }
 
         // Recursively crawl the next page
         return this.crawlPage(nextUrl, question);
