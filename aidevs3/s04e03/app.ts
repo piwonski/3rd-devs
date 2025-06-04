@@ -1,8 +1,8 @@
 import { HeadquartersService } from '../shared/HeadquartersService';
 import { RequestService } from '../shared/RequestService';
 import { CacheService } from '../shared/CacheService';
-import { PageScraper } from '../shared/PageScraper';
-import type { Page } from '../shared/PageScraper';
+import { OpenAIService } from '../shared/OpenAIService';
+import { WebCrawler, type CrawlerResult } from '../shared/WebCrawler';
 import * as path from 'path';
 
 interface Question {
@@ -10,15 +10,35 @@ interface Question {
     question: string;
 }
 
+async function processQuestions(webCrawler: WebCrawler, questions: Question[]): Promise<CrawlerResult[]> {
+    const results: CrawlerResult[] = [];
+
+    for (const question of questions) {
+        console.log(`Processing question: ${question.question}`);
+        
+        const result = await webCrawler.startCrawling(question);
+        if (result) {
+            results.push(result);
+            console.log(`Found answer for question ${question.index}: ${result.answer}`);
+            console.log(`Visited URLs: ${result.visitedUrls.join(' -> ')}`);
+        } else {
+            console.log(`No answer found for question ${question.index}`);
+        }
+    }
+
+    return results;
+}
+
 async function main() {
     const requestService = new RequestService();
     const headquarters = new HeadquartersService(requestService);
     const cacheService = new CacheService(path.join(__dirname, 'cache'));
+    const openAIService = new OpenAIService();
     
     // Ensure cache directory exists
     await cacheService.ensureCacheDirectory();
     
-    const pageScraper = new PageScraper(requestService, cacheService);
+    const webCrawler = new WebCrawler(requestService, cacheService, openAIService);
     
     try {
         // Get questions
@@ -32,10 +52,13 @@ async function main() {
         
         console.log('Questions:', questionsList);
 
-        // Scrape the page
-        const url = 'https://softo.ag3nts.org';
-        const page = await pageScraper.scrapePage(url);
-        console.log('Page:', page);
+        // Process questions using the web crawler
+        const results = await processQuestions(webCrawler, questionsList);
+        
+        // Send answers back to headquarters
+        for (const result of results) {
+            await headquarters.report(result.question.index, result.answer);
+        }
     } catch (error) {
         console.error('Failed to process:', error);
     }
