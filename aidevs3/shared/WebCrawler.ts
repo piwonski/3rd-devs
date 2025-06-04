@@ -55,7 +55,7 @@ export class WebCrawler {
         const messages: ChatCompletionMessageParam[] = [
             {
                 role: 'system',
-                content: 'You are an answer extractor. Your ONLY job is to return EXACTLY the answer found in the content, or "NO_ANSWER". Do not explain, do not add any text. Just return the answer.'
+                content: 'You are an answer extractor. Your ONLY job is to return EXACTLY the answer found in the content, or "NO_ANSWER". Do not explain, do not add any text. Just return the answer. Be very precise in deciding if the answer is found in the content.'
             },
             {
                 role: 'user',
@@ -96,44 +96,75 @@ export class WebCrawler {
         const messages: ChatCompletionMessageParam[] = [
             {
                 role: 'system',
-                content: `You are a link selector. Your job is to select the most relevant link that might contain information related to the question.
+                content: `You are a link selector. Your job is to evaluate the relevance of each link that might contain information related to the question.
 
 Analyze the link information to understand what each link might contain. Consider:
 - The meaning of the link text
 - The title attribute which often provides additional context
 - The relationship between the question and potential content
 
-Return EXACTLY one of the available links, or "NO_RELEVANT_LINK" if none seem relevant. Do not explain, just return the link.`
+For each link create relevance rank between 0 and 1 (0 means not relevant at all, 1 means perfect match).
+
+Return a JSON array of objects, each containing:
+- relevanceRate: number between 0 and 1
+- url: the URL of the link
+
+Example response: [{"relevanceRate": 0.8, "url": "https://example.com/page1"}, {"relevanceRate": 0.3, "url": "https://example.com/page2"}]`
             },
             {
                 role: 'user',
                 content: `Question: ${question.question}
 
-Available links:\n${unvisitedLinks.map(link => 
-    `- ${link.href} (${link.text}${link.title ? ` - ${link.title}` : ''})`
-).join('\n')}
+Available links:
+${JSON.stringify(unvisitedLinks.map(link => ({
+    url: link.href,
+    text: link.text,
+    title: link.title || ''
+})), null, 2)}
 
-Return EXACTLY one of these links, or "NO_RELEVANT_LINK".`
+Return a JSON array of objects with relevanceRate and url for each link.`
             }
         ];
 
         const response = await this.openAIService.completion({ messages }) as ChatCompletion;
         const selectedLink = response.choices[0]?.message?.content?.trim() ?? null;
         
-        if (!selectedLink || selectedLink === "NO_RELEVANT_LINK") {
-            console.log('No relevant link selected for question:', question.question);
+        if (!selectedLink) {
+            console.log('No link selected for question:', question.question);
             return null;
         }
 
-        // Find the exact match from available links
-        const exactMatch = unvisitedLinks.find(link => link.href === selectedLink);
-        if (exactMatch) {
-            console.log('Selected link:', exactMatch.href, 'with text:', exactMatch.text, exactMatch.title ? `and title: ${exactMatch.title}` : '');
-            return exactMatch.href;
-        }
+        try {
+            const results = JSON.parse(selectedLink);
 
-        console.warn('Invalid link selection:', selectedLink);
-        return null;
+            console.log('Relevance results:', results);
+            
+            if (!Array.isArray(results) || results.length === 0) {
+                console.log('Invalid response format or no links evaluated');
+                return null;
+            }
+
+            // Sort by relevance rate and get the highest rated link
+            const bestResult = results.sort((a, b) => b.relevanceRate - a.relevanceRate)[0];
+            
+            if (bestResult.relevanceRate === 0) {
+                console.log('No relevant links found for question:', question.question);
+                return null;
+            }
+
+            // Find the exact match from available links
+            const exactMatch = unvisitedLinks.find(link => link.href === bestResult.url);
+            if (exactMatch) {
+                console.log('Selected link:', exactMatch.href, 'with relevance rate:', bestResult.relevanceRate);
+                return exactMatch.href;
+            }
+
+            console.warn('Invalid link selection:', bestResult.url);
+            return null;
+        } catch (error) {
+            console.warn('Invalid JSON response:', selectedLink);
+            return null;
+        }
     }
 
     async crawlPage(url: string, question: Question): Promise<CrawlerResult | null> {
@@ -147,6 +178,10 @@ Return EXACTLY one of these links, or "NO_RELEVANT_LINK".`
 
         // Scrape the page
         const page = await this.pageScraper.scrapePage(url);
+        if (page.links.length > 50) {
+            console.log('Too many links on page:', url);
+            return null;
+        }
 
         // Check if we can answer the question with current page
         const answer = await this.checkForAnswer(page, question);

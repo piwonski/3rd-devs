@@ -44,10 +44,8 @@ async function supervisionCallback(context: SupervisionContext): Promise<boolean
 async function processQuestions(webCrawler: WebCrawler, questions: Question[]): Promise<CrawlerResult[]> {
     const results: CrawlerResult[] = [];
 
-    const filteredQuestions = questions.filter(question => question.index === '02');
-
-    for (const question of filteredQuestions) {
-        console.log(`Processing question: ${question.question}`);
+    for (const question of questions) {
+        console.log(`\nProcessing question: ${question.index} - ${question.question}`);
         
         const result = await webCrawler.startCrawling(question);
         if (result) {
@@ -88,11 +86,18 @@ async function main() {
 
         // Process questions using the web crawler
         const results = await processQuestions(webCrawler, questionsList);
+
+        console.log('Results:', results);
         
-        // Send answers back to headquarters
-        for (const result of results) {
-            await headquarters.report(result.question.index, result.answer);
-        }
+        // Format answers into the required structure
+        const formattedAnswers = results.reduce((acc, result) => {
+            acc[result.question.index] = result.answer;
+            return acc;
+        }, {} as Record<string, string>);
+        
+        // Send all answers back to headquarters in one request
+        const headquartersResponse = await headquarters.report('softo', formattedAnswers);
+        console.log('Headquarters response:', headquartersResponse);
     } catch (error) {
         console.error('Failed to process:', error);
     } finally {
