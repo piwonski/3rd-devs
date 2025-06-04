@@ -5,11 +5,17 @@ import { JSDOM } from 'jsdom';
 import * as fs from 'fs';
 import * as path from 'path';
 
+export interface Link {
+    href: string;
+    text: string;
+    title?: string;
+}
+
 export interface Page {
     url: string;
     markdown: string;
     html: string;
-    links: string[];
+    links: Link[];
 }
 
 export class PageScraper {
@@ -61,43 +67,89 @@ export class PageScraper {
         comments.forEach(comment => comment.remove());
 
         // Get the cleaned HTML and remove any remaining JS-style comments
-        const cleanedHtml = document.body.innerHTML;
-        return cleanedHtml
+        const cleanedHtml = document.body.innerHTML
             .replace(/\/\/-->/g, '')          // Remove JS-style comment endings
-            .replace(/\/\/.*$/gm, '');        // Remove single-line JS comments
+            .replace(/\/\/.*$/gm, '')         // Remove single-line JS comments
+            .replace(/\n\s*\n/g, '\n')        // Remove multiple empty lines
+            .trim();                          // Remove leading/trailing whitespace
+
+        // Create a new DOM to ensure proper HTML structure
+        const cleanDom = new JSDOM(cleanedHtml);
+        return cleanDom.window.document.body.innerHTML;
     }
 
-    private extractLinksFromHtml(html: string): string[] {
+    private extractLinksFromHtml(html: string, baseUrl: string): Link[] {
         const dom = new JSDOM(html);
         const document = dom.window.document;
-        const links = new Set<string>();
+        const baseUrlObj = new URL(baseUrl);
+        const links = new Set<Link>();
+
+        // Remove hidden elements before extracting links
+        document.querySelectorAll('[style*="display: none"], [hidden], .hidden, .invisible, .collapsed, [class*="hidden"]')
+            .forEach(el => el.remove());
 
         // Get all anchor tags
-        document.querySelectorAll('a[href]').forEach(anchor => {
+        const allAnchors = document.querySelectorAll('a[href]');
+        console.log('Found anchors:', allAnchors.length);
+        
+        allAnchors.forEach(anchor => {
             const href = anchor.getAttribute('href');
-            // Only include relative URLs (sub-pages) and exclude main page
-            if (href && 
-                !href.startsWith('#') && 
-                !href.startsWith('javascript:') && 
-                !href.startsWith('http') && 
-                href !== '/') {
-                links.add(href);
+            if (!href) return;
+
+            // Get text content, handling nested elements
+            let text = '';
+            const textNodes = Array.from(anchor.childNodes)
+                .filter(node => node.nodeType === dom.window.Node.TEXT_NODE)
+                .map(node => node.textContent?.trim())
+                .filter(Boolean);
+            text = textNodes.join(' ').trim() || href;
+            
+            const title = anchor.getAttribute('title')?.trim();
+            
+            console.log('Found link:', { href, text, title, outerHTML: anchor.outerHTML });
+            
+            // Skip unwanted links
+            if (href.startsWith('#') || href.startsWith('javascript:')) {
+                console.log('Skipping unwanted link:', href);
+                return;
+            }
+
+            try {
+                const fullUrl = new URL(href, baseUrl);
+                // Include links from the same domain or relative paths
+                if (fullUrl.hostname === baseUrlObj.hostname || href.startsWith('/')) {
+                    console.log('Adding valid link:', { href, text, title });
+                    links.add({ 
+                        href: fullUrl.pathname,  // Only use pathname
+                        text, 
+                        title 
+                    });
+                } else {
+                    console.log('Skipping external link:', fullUrl.toString());
+                }
+            } catch (e) {
+                console.warn('Invalid URL:', href);
             }
         });
-
-        return Array.from(links);
+        
+        const result = Array.from(links);
+        console.log('Final links:', result);
+        return result;
     }
 
     async scrapePage(url: string): Promise<Page> {
         const html = await this.requestService.getText(url);
+        console.log('Raw HTML from request:', html);
+        
+        const links = await this.cacheService.getOrFetch(this.getCacheKey(url, 'links'), async () => {
+            const extractedLinks = this.extractLinksFromHtml(html, url);
+            return JSON.stringify(extractedLinks);
+        }).then(cachedLinks => JSON.parse(cachedLinks) as Link[]);
+        
         const cleanedHtml = await this.cacheService.getOrFetch(this.getCacheKey(url, 'html'), async () => {
             return this.cleanHtml(html);
         });
-        
-        const links = await this.cacheService.getOrFetch(this.getCacheKey(url, 'links'), async () => {
-            const extractedLinks = this.extractLinksFromHtml(cleanedHtml);
-            return JSON.stringify(extractedLinks);
-        }).then(cachedLinks => JSON.parse(cachedLinks) as string[]);
+        console.log('Cleaned HTML:', cleanedHtml);
         
         const markdown = await this.cacheService.getOrFetch(this.getCacheKey(url, 'md'), async () => {
             return this.nhm.translate(cleanedHtml);
