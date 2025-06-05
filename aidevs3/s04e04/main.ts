@@ -7,7 +7,7 @@ async function main() {
         const requestService = new RequestService();
         const headquartersService = new HeadquartersService(requestService);
         
-        const host = process.env.AZYL_HOST;
+        const host = process.env.NGROK_HOST;
         
         // Construct the server URL
         const serverUrl = `${host}${startFlightRoute}`;
