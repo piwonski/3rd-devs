@@ -101,18 +101,7 @@ class App {
             await this.cacheService.ensureCacheDirectory();
 
             // Download or get from cache Rafał's notebook (PDF)
-            console.log('📖 Getting Rafał\'s notebook (PDF)...');
-            const pdfUrl = 'https://c3ntrala.ag3nts.org/dane/notatnik-rafala.pdf';
-            const pdfPath = path.join(this.cacheDir, 'notatnik-rafala.pdf');
-            
-            if (!fs.existsSync(pdfPath)) {
-                console.log('📥 Downloading PDF from server...');
-                const pdfBuffer = await this.downloadBinaryFile(pdfUrl);
-                fs.writeFileSync(pdfPath, pdfBuffer);
-                console.log('✅ PDF downloaded and cached');
-            } else {
-                console.log('📦 Using cached PDF file');
-            }
+            const pdfPath = await this.downloadOrGetRafalsNotebook();
 
             // Process PDF content
             console.log('\n🔍 Processing PDF content...');
@@ -167,7 +156,7 @@ class App {
             }
             
             let answers: Record<string, string> = {};
-            let feedback: string[] = [];
+            let questionFeedback: Record<string, string[]> = {}; // Feedback per pytanie
             let finalFlag: string | null = null;
             let analysisResult: { success: boolean; flag: string | null; errorMessage: string } | null = null;
             
@@ -199,7 +188,7 @@ class App {
                 // Zadaj pytania (tylko te które nie są w keszu)
                 let newAnswers: Record<string, string> = {};
                 if (questionsToAsk.length > 0) {
-                    newAnswers = await this.answerQuestions(fullNotebookContent, questionsData, feedback, questionsToAsk);
+                    newAnswers = await this.answerQuestions(fullNotebookContent, questionsData, questionFeedback, questionsToAsk);
                 }
                 
                 // Połącz nowe odpowiedzi z keszowanymi poprawnymi
@@ -256,17 +245,25 @@ class App {
                         // Przygotuj pytania do zadania w następnej iteracji
                         questionsToAsk = incorrectQuestions;
                         
-                        // Dodaj hint z odpowiedzi oraz informację o błędnej odpowiedzi z debug
-                        let feedbackMessage = '';
-                        if ('hint' in result && result.hint) {
-                            feedbackMessage += `Wskazówka: ${result.hint}`;
-                        }
-                        if ('debug' in result && result.debug) {
-                            if (feedbackMessage) feedbackMessage += ' ';
-                            feedbackMessage += `Błędna odpowiedź której NIE WOLNO Ci powtórzyć: ${result.debug}`;
-                        }
-                        if (feedbackMessage) {
-                            feedback.push(feedbackMessage);
+                        // Dodaj feedback tylko dla błędnych pytań
+                        if (incorrectQuestions.length > 0) {
+                            let feedbackMessage = '';
+                            if ('hint' in result && result.hint) {
+                                feedbackMessage += `Wskazówka: ${result.hint}`;
+                            }
+                            if ('debug' in result && result.debug) {
+                                if (feedbackMessage) feedbackMessage += ' ';
+                                feedbackMessage += `Błędna odpowiedź której NIE WOLNO Ci powtórzyć: ${result.debug}`;
+                            }
+                            if (feedbackMessage) {
+                                // Przypisz feedback do wszystkich błędnych pytań
+                                incorrectQuestions.forEach(questionId => {
+                                    if (!questionFeedback[questionId]) {
+                                        questionFeedback[questionId] = [];
+                                    }
+                                    questionFeedback[questionId].push(feedbackMessage);
+                                });
+                            }
                         }
                         
                         if (iteration === maxIterations) {
@@ -276,7 +273,13 @@ class App {
                     
                 } catch (error) {
                     console.error(`❌ Błąd w iteracji ${iteration}:`, error);
-                    feedback.push(`Iteracja ${iteration}: Błąd techniczny: ${error}. Spróbuj inne podejście.`);
+                    // Przypisz błąd techniczny do wszystkich pytań które były zadawane
+                    questionsToAsk.forEach(questionId => {
+                        if (!questionFeedback[questionId]) {
+                            questionFeedback[questionId] = [];
+                        }
+                        questionFeedback[questionId].push(`Iteracja ${iteration}: Błąd techniczny: ${error}. Spróbuj inne podejście.`);
+                    });
                     
                     if (iteration === maxIterations) {
                         console.log('⚠️ Osiągnięto maksymalną liczbę iteracji z błędami.');
@@ -328,6 +331,22 @@ class App {
         }
     }
 
+    private async downloadOrGetRafalsNotebook() {
+        console.log('📖 Getting Rafał\'s notebook (PDF)...');
+        const pdfUrl = 'https://c3ntrala.ag3nts.org/dane/notatnik-rafala.pdf';
+        const pdfPath = path.join(this.cacheDir, 'notatnik-rafala.pdf');
+
+        if (!fs.existsSync(pdfPath)) {
+            console.log('📥 Downloading PDF from server...');
+            const pdfBuffer = await this.downloadBinaryFile(pdfUrl);
+            fs.writeFileSync(pdfPath, pdfBuffer);
+            console.log('✅ PDF downloaded and cached');
+        } else {
+            console.log('📦 Using cached PDF file');
+        }
+        return pdfPath;
+    }
+
     private displayResults(pdfContent: any, questionsData: any) {
         console.log('\n🎉 All files ready in cache directory!');
         console.log('\nAvailable files:');
@@ -365,19 +384,8 @@ class App {
         console.log('\n🎯 Ready to analyze PDF content against questions!');
     }
 
-    async answerQuestions(fullNotebookContent: string, questionsData: any, feedback: string[], questionsToAsk: string[]): Promise<Record<string, string>> {
+    async answerQuestions(fullNotebookContent: string, questionsData: any, questionFeedback: Record<string, string[]>, questionsToAsk: string[]): Promise<Record<string, string>> {
         console.log('\n🔍 Analyzing questions with AI - iterative approach...\n');
-        
-        // Wyświetl feedback który będzie przekazany do modelu
-        if (feedback.length > 0) {
-            console.log('📝 Feedback z poprzednich iteracji przekazywany do modelu:');
-            feedback.forEach((hint, index) => {
-                console.log(`${index + 1}. ${hint}`);
-            });
-            console.log(''); // Pusta linia dla czytelności
-        } else {
-            console.log('📝 Brak feedbacku - pierwsza iteracja\n');
-        }
         
         const answers: Record<string, string> = {};
         
@@ -385,10 +393,22 @@ class App {
             console.log(`\n🎯 Przetwarzam pytanie ${questionId}: ${questionsData[questionId]}`);
             
             try {
-                // Przygotuj kontekst z feedback z poprzednich pytań
-                const feedbackContext = feedback.length > 0 
-                    ? `\n\nWAŻNE - FEEDBACK Z POPRZEDNICH ODPOWIEDZI:\n${feedback.join('\n')}\n\nTo są wskazówki z systemu oceniającego - MUSISZ je uwzględnić w swojej analizie!`
+                // Przygotuj kontekst z feedback dla tego konkretnego pytania
+                const feedbackForQuestion = questionFeedback[questionId] || [];
+                const feedbackContext = feedbackForQuestion.length > 0 
+                    ? `\n\nWAŻNE - FEEDBACK DLA TEGO PYTANIA:\n${feedbackForQuestion.join('\n')}\n\nTo są wskazówki z systemu oceniającego - MUSISZ je uwzględnić w swojej analizie!`
                     : '';
+                
+                // Wyświetl feedback tylko jeśli istnieje dla tego pytania
+                if (feedbackForQuestion.length > 0) {
+                    console.log(`📝 Feedback dla pytania ${questionId}:`);
+                    feedbackForQuestion.forEach((hint, index) => {
+                        console.log(`${index + 1}. ${hint}`);
+                    });
+                    console.log(''); // Pusta linia dla czytelności
+                } else {
+                    console.log(`📝 Brak feedbacku dla pytania ${questionId} - pierwsza próba\n`);
+                }
                 
                 // Wyświetl dokładnie jaki feedback context jest przekazywany do modelu
                 if (feedbackContext) {
