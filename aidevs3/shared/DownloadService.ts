@@ -17,7 +17,7 @@ export class DownloadService {
             }
             const destinationPath = path.join(this.cacheDir, destinationFileName);
             
-            console.log('Downloading zip file...');
+            console.log('Downloading file...');
             await this.download(url, destinationPath);
             console.log('Download completed successfully!');
         } catch (error) {

@@ -1,6 +1,11 @@
 import * as fs from 'fs/promises';
 import * as path from 'path';
 
+export interface Serializer<T> {
+    serialize(data: T): string;
+    deserialize(data: string): T;
+}
+
 export class CacheService {
     private cacheDir: string;
 
@@ -109,7 +114,7 @@ export class CacheService {
     }
 
     /**
-     * Gets data from cache or fetches it using the provided callback
+     * Gets data from cache or fetches it using the provided callback (string version)
      * @param filename The name of the file to read/fetch
      * @param fetchCallback Callback function to fetch data if not in cache
      * @returns The file contents as a string
@@ -117,10 +122,56 @@ export class CacheService {
     async getOrFetch(filename: string, fetchCallback: () => Promise<string>): Promise<string> {
         const cachedData = await this.readFile(filename);
         if (cachedData) {
+            console.log(`📦 Using cached data for ${filename}`);
             return cachedData;
         }
+        console.log(`💾 Caching fresh data for ${filename}`);
         const freshData = await fetchCallback();
         await this.writeFile(filename, freshData);
         return freshData;
+    }
+
+    /**
+     * Gets typed data from cache or fetches it using the provided callback and serializer
+     * @param filename The name of the file to read/fetch
+     * @param fetchCallback Callback function to fetch data if not in cache
+     * @param serializer Serializer to handle data conversion
+     * @returns The typed data
+     */
+    async getOrFetchTyped<T>(
+        filename: string, 
+        fetchCallback: () => Promise<T>, 
+        serializer: Serializer<T>
+    ): Promise<T> {
+        const cachedData = await this.readFile(filename);
+        if (cachedData) {
+            console.log(`📦 Using cached data for ${filename}`);
+            return serializer.deserialize(cachedData);
+        }
+        console.log(`💾 Caching fresh data for ${filename}`);
+        const freshData = await fetchCallback();
+        const serializedData = serializer.serialize(freshData);
+        await this.writeFile(filename, serializedData);
+        return freshData;
+    }
+
+    /**
+     * Gets JSON data from cache or fetches it
+     */
+    async getOrFetchJson<T>(filename: string, fetchCallback: () => Promise<T>): Promise<T> {
+        return this.getOrFetchTyped(filename, fetchCallback, {
+            serialize: (data: T) => JSON.stringify(data, null, 2),
+            deserialize: (data: string) => JSON.parse(data)
+        });
+    }
+
+    /**
+     * Gets binary data from cache or fetches it
+     */
+    async getOrFetchBinary(filename: string, fetchCallback: () => Promise<Buffer>): Promise<Buffer> {
+        return this.getOrFetchTyped(filename, fetchCallback, {
+            serialize: (data: Buffer) => data.toString('base64'),
+            deserialize: (data: string) => Buffer.from(data, 'base64')
+        });
     }
 } 
