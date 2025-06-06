@@ -8,11 +8,14 @@ class App {
     private requestService: RequestService;
     private headquartersService: HeadquartersService;
     private cacheService: CacheService;
+    private cacheDir: string;
 
     constructor() {
         this.requestService = new RequestService();
         this.headquartersService = new HeadquartersService(this.requestService);
-        this.cacheService = new CacheService('./cache');
+        this.cacheDir = path.join(__dirname, 'cache');
+        this.cacheService = new CacheService(this.cacheDir);
+        this.cacheService.ensureCacheDirectory();
     }
 
     async run() {
@@ -25,7 +28,7 @@ class App {
             // Download or get from cache Rafał's notebook (PDF)
             console.log('📖 Getting Rafał\'s notebook (PDF)...');
             const pdfUrl = 'https://c3ntrala.ag3nts.org/dane/notatnik-rafala.pdf';
-            const pdfPath = path.join('./cache', 'notatnik-rafala.pdf');
+            const pdfPath = path.join(this.cacheDir, 'notatnik-rafala.pdf');
             
             if (!fs.existsSync(pdfPath)) {
                 console.log('📥 Downloading PDF from server...');
