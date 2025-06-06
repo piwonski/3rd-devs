@@ -3,6 +3,7 @@ import type { ChatCompletionMessageParam } from "openai/resources/chat/completio
 import type { ChatCompletionContentPart } from "openai/resources/chat/completions";
 import Groq from "groq-sdk";
 import { Environment } from "./Environment";
+import { ExpenseCounter } from "./ExpenseCounter";
 import fs from "fs";
 import type {CreateEmbeddingResponse} from "openai/resources/embeddings";
 
@@ -10,13 +11,15 @@ export class OpenAIService {
   private openai: OpenAI;
   private groq: Groq;
   private embeddingDimensions: number;
+  private expenseCounter?: ExpenseCounter;
 
-  constructor(embeddingDimensions: number = 3072) {
+  constructor(embeddingDimensions: number = 3072, expenseCounter?: ExpenseCounter) {
     this.openai = new OpenAI();
     this.groq = new Groq({
       apiKey: Environment.getGroqApiKey()
     });
     this.embeddingDimensions = embeddingDimensions;
+    this.expenseCounter = expenseCounter;
   }
 
   async completion(config: {
@@ -37,7 +40,10 @@ export class OpenAIService {
       if (stream) {
         return chatCompletion as AsyncIterable<OpenAI.Chat.Completions.ChatCompletionChunk>;
       } else {
-        return chatCompletion as OpenAI.Chat.Completions.ChatCompletion;
+        const completion = chatCompletion as OpenAI.Chat.Completions.ChatCompletion;
+        // Track costs automatically
+        this.expenseCounter?.increaseCost(completion);
+        return completion;
       }
     } catch (error) {
       console.error("Error in OpenAI completion:", error);
@@ -112,6 +118,9 @@ export class OpenAIService {
         messages,
       });
 
+      // Track costs automatically
+      this.expenseCounter?.increaseCost(response);
+
       return {
         description: response.choices[0].message.content || "No description available.",
         source: imagePath,
@@ -135,10 +144,21 @@ export class OpenAIService {
       ];
 
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4.1",
         messages,
         response_format: { type: "json_object" }
       });
+
+      // Track costs automatically
+      this.expenseCounter?.increaseCost(response);
+      
+      if (this.expenseCounter) {
+        console.log('💰 Vision API call completed - tokens used:', {
+          input: response.usage?.prompt_tokens || 0,
+          output: response.usage?.completion_tokens || 0,
+          total: response.usage?.total_tokens || 0
+        });
+      }
 
       try {
         const result = JSON.parse(response.choices[0].message.content || '{}');
