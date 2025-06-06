@@ -114,7 +114,7 @@ export class OpenAIService {
       ];
 
       const response = await this.openai.chat.completions.create({
-        model: "gpt-4o",
+        model: "gpt-4.1",
         messages,
       });
 
