@@ -12,6 +12,12 @@ import { promisify } from 'util';
 const pdfParse = require('pdf-parse-debugging-disabled');
 const execAsync = promisify(exec);
 
+interface QuestionWithContext {
+    id: string;
+    text: string;
+    feedbacks: string[];
+}
+
 class PdfProcessor {
     private openaiService: OpenAIService;
     private cacheService: CacheService;
@@ -144,15 +150,15 @@ class App {
                 try {
                     const cachedAnswers = JSON.parse(fs.readFileSync(correctAnswersPath, 'utf-8'));
                     correctAnswers = cachedAnswers;
-                    console.log('📦 Wczytano poprawne odpowiedzi z keszu:');
+                    console.log('📦 Wczytano poprawne odpowiedzi z cache\'u:');
                     Object.entries(correctAnswers).forEach(([id, answer]) => {
                         console.log(`  ${id}: ${answer}`);
                     });
                 } catch (error) {
-                    console.log('⚠️ Błąd wczytywania keszu odpowiedzi, zaczynam od nowa');
+                    console.log('⚠️ Błąd wczytywania cache\'u odpowiedzi, zaczynam od nowa');
                 }
             } else {
-                console.log('📝 Brak keszu odpowiedzi - pierwsza sesja');
+                console.log('📝 Brak cache\'u odpowiedzi - pierwsza sesja');
             }
             
             let answers: Record<string, string> = {};
@@ -160,15 +166,15 @@ class App {
             let finalFlag: string | null = null;
             let analysisResult: { success: boolean; flag: string | null; errorMessage: string } | null = null;
             
-            // Określ które pytania trzeba zadać (te które nie są w keszu)
+            // Określ które pytania trzeba zadać (te które nie są w cache'u)
             const allQuestionIds = Object.keys(questionsData);
             let questionsToAsk: string[] = allQuestionIds.filter(id => !correctAnswers[id]);
             
             if (questionsToAsk.length === 0) {
-                console.log('🎉 Wszystkie odpowiedzi są już w keszu! Sprawdzam z Centralą...');
+                console.log('🎉 Wszystkie odpowiedzi są już w cache\'u! Sprawdzam z Centralą...');
             } else {
                 console.log(`📝 Pytania do zadania: ${questionsToAsk.join(', ')}`);
-                console.log(`✅ Pytania z keszu: ${Object.keys(correctAnswers).join(', ') || 'brak'}`);
+                console.log(`✅ Pytania z cache'u: ${Object.keys(correctAnswers).join(', ') || 'brak'}`);
             }
             
             const maxIterations = 5;
@@ -178,27 +184,34 @@ class App {
                 
                 // Wyświetl informację o pytaniach do zadania
                 if (questionsToAsk.length === 0) {
-                    console.log('📝 Wszystkie odpowiedzi z keszu - sprawdzam z Centralą');
+                    console.log('📝 Wszystkie odpowiedzi z cache\'u - sprawdzam z Centralą');
                 } else if (questionsToAsk.length === allQuestionIds.length) {
-                    console.log('📝 Zadaję wszystkie pytania (brak keszu)');
+                    console.log('📝 Zadaję wszystkie pytania (brak cache\'u)');
                 } else {
-                    console.log(`📝 Keszowanie: zadaję tylko pytania: ${questionsToAsk.join(', ')}`);
+                    console.log(`📝 Cache'owanie: zadaję tylko pytania: ${questionsToAsk.join(', ')}`);
                 }
                 
-                // Zadaj pytania (tylko te które nie są w keszu)
+                // Zadaj pytania (tylko te które nie są w cache'u)
                 let newAnswers: Record<string, string> = {};
                 if (questionsToAsk.length > 0) {
-                    newAnswers = await this.answerQuestions(fullNotebookContent, questionsData, questionFeedback, questionsToAsk);
+                    // Przygotuj pytania z kontekstem
+                    const questionsWithContext: QuestionWithContext[] = questionsToAsk.map(questionId => ({
+                        id: questionId,
+                        text: questionsData[questionId],
+                        feedbacks: questionFeedback[questionId] || []
+                    }));
+                    
+                    newAnswers = await this.answerQuestions(fullNotebookContent, questionsWithContext);
                 }
                 
-                // Połącz nowe odpowiedzi z keszowanymi poprawnymi
+                // Połącz nowe odpowiedzi z cache'owanymi poprawnymi
                 answers = { ...correctAnswers, ...newAnswers };
                 
                 console.log('\n📋 Finalne odpowiedzi z tej iteracji:');
                 // Sortuj odpowiedzi po numerze pytania
                 const sortedAnswers = Object.entries(answers).sort(([a], [b]) => a.localeCompare(b));
                 sortedAnswers.forEach(([id, answer]) => {
-                    const source = correctAnswers[id] ? '🟢 (kesz)' : '🆕 (nowe)';
+                    const source = correctAnswers[id] ? '🟢 (cache)' : '🆕 (nowe)';
                     console.log(`${id}: ${answer} ${source}`);
                 });
 
@@ -227,19 +240,21 @@ class App {
                         const incorrectQuestions = this.identifyIncorrectQuestions(result);
                         console.log(`🔍 Błędne pytania do poprawienia: ${incorrectQuestions.join(', ')}`);
                         
-                        // Aktualizuj keszowane poprawne odpowiedzi
-                        // Wszystkie pytania które nie są błędne, zostają jako poprawne
+                        // Zbuduj nowy cache poprawnych odpowiedzi
+                        correctAnswers = {};
                         Object.keys(answers).forEach(questionId => {
                             if (!incorrectQuestions.includes(questionId)) {
                                 correctAnswers[questionId] = answers[questionId];
-                                console.log(`✅ Pytanie ${questionId} zostaje w keszu jako poprawne`);
+                                console.log(`✅ Pytanie ${questionId} zostaje w cache'u jako poprawne`);
+                            } else {
+                                console.log(`❌ Pytanie ${questionId} pominięte (niepoprawne)`);
                             }
                         });
                         
                         // Zapisz aktualne poprawne odpowiedzi do pliku
                         if (Object.keys(correctAnswers).length > 0) {
                             fs.writeFileSync(correctAnswersPath, JSON.stringify(correctAnswers, null, 2));
-                            console.log(`💾 Zapisano poprawne odpowiedzi do keszu (${Object.keys(correctAnswers).length} pytań)`);
+                            console.log(`💾 Zapisano poprawne odpowiedzi do cache'u (${Object.keys(correctAnswers).length} pytań)`);
                         }
                         
                         // Przygotuj pytania do zadania w następnej iteracji
@@ -331,6 +346,7 @@ class App {
         }
     }
 
+
     private async downloadOrGetRafalsNotebook() {
         console.log('📖 Getting Rafał\'s notebook (PDF)...');
         const pdfUrl = 'https://c3ntrala.ag3nts.org/dane/notatnik-rafala.pdf';
@@ -384,30 +400,29 @@ class App {
         console.log('\n🎯 Ready to analyze PDF content against questions!');
     }
 
-    async answerQuestions(fullNotebookContent: string, questionsData: any, questionFeedback: Record<string, string[]>, questionsToAsk: string[]): Promise<Record<string, string>> {
+    async answerQuestions(fullNotebookContent: string, questionsWithContext: QuestionWithContext[]): Promise<Record<string, string>> {
         console.log('\n🔍 Analyzing questions with AI - iterative approach...\n');
         
         const answers: Record<string, string> = {};
         
-        for (const questionId of questionsToAsk) {
-            console.log(`\n🎯 Przetwarzam pytanie ${questionId}: ${questionsData[questionId]}`);
+        for (const questionWithContext of questionsWithContext) {
+            console.log(`\n🎯 Przetwarzam pytanie ${questionWithContext.id}: ${questionWithContext.text}`);
             
             try {
                 // Przygotuj kontekst z feedback dla tego konkretnego pytania
-                const feedbackForQuestion = questionFeedback[questionId] || [];
-                const feedbackContext = feedbackForQuestion.length > 0 
-                    ? `\n\nWAŻNE - FEEDBACK DLA TEGO PYTANIA:\n${feedbackForQuestion.join('\n')}\n\nTo są wskazówki z systemu oceniającego - MUSISZ je uwzględnić w swojej analizie!`
+                const feedbackContext = questionWithContext.feedbacks.length > 0 
+                    ? `\n\nWAŻNE - FEEDBACK DLA TEGO PYTANIA:\n${questionWithContext.feedbacks.join('\n')}\n\nTo są wskazówki z systemu oceniającego - MUSISZ je uwzględnić w swojej analizie!`
                     : '';
                 
                 // Wyświetl feedback tylko jeśli istnieje dla tego pytania
-                if (feedbackForQuestion.length > 0) {
-                    console.log(`📝 Feedback dla pytania ${questionId}:`);
-                    feedbackForQuestion.forEach((hint, index) => {
+                if (questionWithContext.feedbacks.length > 0) {
+                    console.log(`📝 Feedback dla pytania ${questionWithContext.id}:`);
+                    questionWithContext.feedbacks.forEach((hint, index) => {
                         console.log(`${index + 1}. ${hint}`);
                     });
                     console.log(''); // Pusta linia dla czytelności
                 } else {
-                    console.log(`📝 Brak feedbacku dla pytania ${questionId} - pierwsza próba\n`);
+                    console.log(`📝 Brak feedbacku dla pytania ${questionWithContext.id} - pierwsza próba\n`);
                 }
                 
                 // Wyświetl dokładnie jaki feedback context jest przekazywany do modelu
@@ -441,7 +456,7 @@ ${feedbackContext}`;
                 const response = await this.openaiService.completion({
                     messages: [
                         { role: "system", content: systemPrompt },
-                        { role: "user", content: `Pytanie: ${questionsData[questionId]}\n\nOdpowiedz krótko i precyzyjnie:` }
+                        { role: "user", content: `Pytanie: ${questionWithContext.text}\n\nOdpowiedz krótko i precyzyjnie:` }
                     ],
                     model: "gpt-4.1"
                 });
@@ -450,18 +465,18 @@ ${feedbackContext}`;
                 console.log(`🤖 AI odpowiedź: ${answer}`);
                 
                 // Zapisz odpowiedź i przejdź do następnego pytania
-                answers[questionId] = answer;
-                console.log(`✅ Odpowiedź ${questionId} zapisana: ${answer}`);
+                answers[questionWithContext.id] = answer;
+                console.log(`✅ Odpowiedź ${questionWithContext.id} zapisana: ${answer}`);
                 
                 // Pauza między pytaniami
                 await new Promise(resolve => setTimeout(resolve, 500));
                 
             } catch (error) {
-                console.error(`❌ Błąd przy pytaniu ${questionId}:`, error);
-                answers[questionId] = "BŁĄD TECHNICZNY";
+                console.error(`❌ Błąd przy pytaniu ${questionWithContext.id}:`, error);
+                answers[questionWithContext.id] = "BŁĄD TECHNICZNY";
             }
             
-            console.log(`\n📊 Pytanie ${questionId} zakończone`);
+            console.log(`\n📊 Pytanie ${questionWithContext.id} zakończone`);
         }
 
         return answers;
