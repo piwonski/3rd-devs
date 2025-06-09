@@ -42,7 +42,7 @@ class PdfProcessor {
         this.cacheService = cacheService;
     }
 
-    async extractTextFromPdf(pdfPath: string): Promise<{ pages1to18: string, page19Text: string }> {
+    async extractTextFromPdf(pdfPath: string): Promise<{ pages1to18: string, page19Text: string, page19ImagePath: string, page19ImageBase64: string }> {
         // Extract text from pages 1-18
         console.log('📄 Extracting text from pages 1-18...');
         const pages1to18Text = await this.cacheService.getOrFetch('pdf-text-pages-1-18.txt', async () => {
@@ -51,45 +51,140 @@ class PdfProcessor {
             return data.text;
         });
 
+        // Extract page 19 image (optimized for LLM usage)
+        console.log('🖼️ Extracting page 19 image...');
+        const page19ImagePath = await this.extractPage19Image(pdfPath);
+        
+        // Get base64 version for LLM usage
+        const page19ImageBase64 = await this.cacheService.getOrFetch('pdf-page-19-base64.txt', async () => {
+            const imageBuffer = fs.readFileSync(page19ImagePath);
+            return imageBuffer.toString('base64');
+        });
+
         // Process page 19 with OCR
-        console.log('🖼️ Processing page 19 with OCR...');
+        console.log('🔍 Processing page 19 with OCR...');
         const page19Text = await this.cacheService.getOrFetch('pdf-page-19-ocr.txt', async () => {
             try {
-                console.log('🔄 Starting PDF page conversion...');
-                
-                // Use ImageMagick directly to convert page 19 (index 18) to PNG
-                const imagePath = path.join(path.dirname(pdfPath), 'page19.png');
-                const command = `magick "${pdfPath}[18]" -density 300 -resize 2000x2000 -quality 95 "${imagePath}"`;
-                
-                console.log(`📝 Running command: ${command}`);
-                await execAsync(command);
-                console.log('✅ PDF page converted successfully');
-                
-                // Use OpenAI Vision to extract text from the image
                 console.log('👁️ Using AI vision to extract text from page 19...');
-                const base64Image = fs.readFileSync(imagePath, 'base64');
-                console.log(`📏 Base64 image size: ${base64Image.length} characters`);
+                console.log(`📏 Base64 image size: ${page19ImageBase64.length} characters`);
+
+                const notebookPrompt = `
+                <NOTATNIK RAFAŁA>
+                ${pages1to18Text}
+                </NOTATNIK RAFAŁA>
+                `;
                 
                 const prompt = `Jesteś ekspertem OCR. Przeanalizuj ten obraz, który zawiera odręczne notatki w języku polskim. 
-                Wyekstrahuj cały tekst z tego obrazu jak najdokładniej. 
+                Obraz zawiera kilka notatek, które są zapisane w różnych miejscach.
+                Spróbuj skleić notatki w jedną całość, zanim wyekstrahujesz tekst.
+                W szczególności skup się na nazwach miejsc, które są zapisane w notatkach.
+                Część odręcznej nazwy znajduje się na jednej części obrazu, a część na drugiej. 
+                Spróbuj skleić te części w jedną całość.
+                
+                Weź pod uwagę, że obraz jest częścią notatnika Rafała.
+
+                Znajdź wszystkie nazwy miejsc w notatniku Rafała, te nazwy mogą też znajdować się w obrazie.
+                Jeśli notatka wspomina o mieście, które znajduje się obok innego miasta, sprawdź, które miasta faktycznie znajdują się w okolicy i dopasuj tę nazwę do napisu z notatki.
+                
+                Wyekstrahuj cały tekst z tego obrazu jak najdokładniej.
                 Zwróć odpowiedź w formacie JSON z polem "preview" zawierającym wyekstrahowany tekst.
-                Jeśli jakieś słowa są nieczytelne, oznacz je jako [NIECZYTELNE].`;
+                W polu 'thinking' zwróć swoje myśli i rozumowanie.`;
 
                 console.log('🤖 Calling OpenAI Vision API...');
-                const result = await this.openaiService.processImageWithPrompt(base64Image, prompt, 'page19');
+
+                const result = await this.openaiService.completion({
+                    messages: [
+                        { role: "system", content: notebookPrompt },
+                        { 
+                            role: "user", 
+                            content: [
+                                { type: "text", text: prompt },
+                                { type: "image_url", image_url: { url: `data:image/png;base64,${page19ImageBase64}` } }
+                            ]
+                        }
+                    ],
+                    model: "gpt-4.1",
+                    jsonMode: true
+                });
+
                 console.log('✅ OpenAI Vision API completed');
                 
-                return result.preview;
+                const content = (result as any).choices[0].message.content;
+                const jsonMatch = content.match(/\{.*"preview".*\}/s);
+                const json = jsonMatch ? JSON.parse(jsonMatch[0]) : {};
+                console.log('💡 Myśli:', json.thinking);
+                return json.preview;
             } catch (error) {
-                console.error('❌ Error during page 19 processing:', error);
+                console.error('❌ Error during page 19 OCR processing:', error);
                 throw error;
             }
         });
 
         return {
             pages1to18: pages1to18Text,
-            page19Text: page19Text
+            page19Text: page19Text,
+            page19ImagePath: page19ImagePath,
+            page19ImageBase64: page19ImageBase64
         };
+    }
+
+    private async extractPage19Image(pdfPath: string): Promise<string> {
+        const imagePath = path.join(path.dirname(pdfPath), 'page19-optimized.png');
+        
+        // Check if image already exists in cache
+        if (fs.existsSync(imagePath)) {
+            console.log('📦 Using cached page 19 image');
+            return imagePath;
+        }
+
+        console.log('🔄 Converting PDF page 19 to optimized image...');
+        
+        // Try multiple methods for PDF to image conversion
+        const methods = [
+            {
+                name: 'pdftoppm',
+                command: `pdftoppm -png -f 19 -l 19 -r 300 "${pdfPath}" "${imagePath.replace('.png', '')}"`,
+                postProcess: async () => {
+                    // pdftoppm creates files with suffix, rename to our expected name
+                    const generatedFile = imagePath.replace('.png', '-19.png');
+                    if (fs.existsSync(generatedFile)) {
+                        fs.renameSync(generatedFile, imagePath);
+                    }
+                }
+            },
+            {
+                name: 'ImageMagick with policy bypass',
+                command: `magick -density 300 "${pdfPath}[18]" -background white -alpha remove -resize 1536x1536> -quality 90 "${imagePath}"`,
+                postProcess: async () => {}
+            },
+            {
+                name: 'ImageMagick standard',
+                command: `convert -density 300 "${pdfPath}[18]" -background white -alpha remove -resize 1536x1536> -quality 90 "${imagePath}"`,
+                postProcess: async () => {}
+            }
+        ];
+
+        for (const method of methods) {
+            try {
+                console.log(`📝 Trying ${method.name}...`);
+                console.log(`📝 Command: ${method.command}`);
+                
+                await execAsync(method.command);
+                await method.postProcess();
+                
+                if (fs.existsSync(imagePath)) {
+                    console.log(`✅ PDF page converted successfully using ${method.name}`);
+                    return imagePath;
+                }
+                
+            } catch (error) {
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                console.log(`⚠️ ${method.name} failed: ${errorMessage}`);
+                continue;
+            }
+        }
+        
+        throw new Error('All PDF conversion methods failed. Please install pdftoppm (poppler-utils) or configure ImageMagick with PDF support.');
     }
 }
 
@@ -101,6 +196,7 @@ class App {
     private expenseCounter: ExpenseCounter;
     private pdfProcessor: PdfProcessor;
     private cacheDir: string;
+    private page19ImageBase64: string | null = null;
 
     constructor() {
         this.requestService = new RequestService();
@@ -128,11 +224,16 @@ class App {
             console.log('\n🔍 Processing PDF content...');
             const pdfContent = await this.pdfProcessor.extractTextFromPdf(pdfPath);
 
+            // Store page 19 image for later LLM usage
+            this.page19ImageBase64 = pdfContent.page19ImageBase64;
+
             // Save processed content
             const fullContentPath = path.join(this.cacheDir, 'notatnik-full-content.txt');
             const fullContent = `=== STRONY 1-18 (TEKST) ===\n\n${pdfContent.pages1to18}\n\n=== STRONA 19 (OCR) ===\n\n${pdfContent.page19Text}`;
             fs.writeFileSync(fullContentPath, fullContent);
             console.log(`✅ Full PDF content saved to: ${fullContentPath}`);
+            console.log(`🖼️ Page 19 image available at: ${pdfContent.page19ImagePath}`);
+            console.log(`📏 Page 19 base64 ready for LLM usage (${pdfContent.page19ImageBase64.length} chars)`);
 
             // Get API key and download or get from cache questions (JSON)
             console.log('\n📋 Getting questions list (JSON)...');
@@ -673,17 +774,6 @@ ${feedbackContext}`;
         }
     }
 
-    private getQuestionsData(): any {
-        // Helper method to get questions data - this should be passed or stored
-        return {
-            "01": "Do którego roku przeniósł się Rafał",
-            "02": "Kto wpadł na pomysł, aby Rafał przeniósł się w czasie?",
-            "03": "Gdzie znalazł schronienie Rafał? Nazwij krótko to miejsce",
-            "04": "Którego dnia Rafał ma spotkanie z Andrzejem? (format: YYYY-MM-DD)",
-            "05": "Gdzie się chce dostać Rafał po spotkaniu z Andrzejem?"
-        };
-    }
-
     private async downloadBinaryFile(url: string): Promise<Buffer> {
         const response = await fetch(url);
         if (!response.ok) {
@@ -692,6 +782,38 @@ ${feedbackContext}`;
 
         const buffer = await response.arrayBuffer();
         return Buffer.from(buffer);
+    }
+
+    /**
+     * Get page 19 image base64 for LLM usage
+     */
+    getPage19ImageBase64(): string | null {
+        return this.page19ImageBase64;
+    }
+
+    /**
+     * Utility method to easily send page 19 image to LLM with custom prompt
+     */
+    async analyzeImageWithLLM(base64Image: string, prompt: string, contextId: string = 'page19-analysis'): Promise<any> {
+        console.log(`🤖 Analizuję obraz strony 19 z promptem: ${prompt.substring(0, 100)}...`);
+        try {
+            const result = await this.openaiService.processImageWithPrompt(base64Image, prompt, contextId);
+            console.log('✅ Analiza obrazu zakończona');
+            return result;
+        } catch (error) {
+            console.error('❌ Błąd podczas analizy obrazu:', error);
+            throw error;
+        }
+    }
+
+    /**  
+     * Analyze page 19 image with custom prompt (convenience method)
+     */
+    async analyzePage19WithPrompt(prompt: string, contextId: string = 'page19-analysis'): Promise<any> {
+        if (!this.page19ImageBase64) {
+            throw new Error('Page 19 image not available. Make sure PDF processing is completed first.');
+        }
+        return this.analyzeImageWithLLM(this.page19ImageBase64, prompt, contextId);
     }
 }
 
