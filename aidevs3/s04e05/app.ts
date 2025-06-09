@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import type { HeadquartersResponse } from '../shared/sharedTypes';
 
 // Use require for pdf-parse-debugging-disabled to avoid type issues
 const pdfParse = require('pdf-parse-debugging-disabled');
@@ -257,8 +258,10 @@ class App {
                     } else {
                         console.log(`❌ Iteracja ${iteration}: Niektóre odpowiedzi wymagają poprawy`);
                         
-                                                // Określ które pytania są błędne na podstawie odpowiedzi Centrali
-                        const incorrectQuestionsWithContext = this.identifyIncorrectQuestions(result, questionsData);
+                        // Przygotuj feedback dla błędnych pytań
+                        const feedback = await this.prepareFeedback(result, fullNotebookContent, questionsData);
+                        // Określ które pytania są błędne na podstawie odpowiedzi Centrali
+                        const incorrectQuestionsWithContext = this.identifyIncorrectQuestions(result, questionsData, feedback);
                         console.log(`🔍 Błędne pytania do poprawienia: ${incorrectQuestionsWithContext.map(q => q.id).join(', ')}`);
                         
                         // Zbuduj nowy cache poprawnych odpowiedzi
@@ -554,55 +557,120 @@ ${feedbackContext}`;
         return { success: false, flag: null, errorMessage: message };
     }
 
-    private identifyIncorrectQuestions(result: any, questionsData: QuestionWithContext[]): QuestionWithContext[] {
-        if (!result) return [];
+    private findIncorrectQuestionId(result: HeadquartersResponse): string | null {
+        if (!result || result.code === 0) {
+            return null;
+        }
         
-        // Przygotuj feedback na podstawie odpowiedzi centrali
-        const headquartersHint = ('hint' in result && result.hint) ? String(result.hint) : '';
-        const incorrectValue = ('debug' in result && result.debug) ? String(result.debug) : '';
+        const message = result.message || '';
         
+        // Szukaj wzorców typu "question 01", "question 02" etc.
+        const questionMatch = message.match(/question (\d+)/i);
+        if (questionMatch) {
+            const questionNumber = questionMatch[1].padStart(2, '0'); // "01", "02", etc.
+            console.log(`🎯 Zidentyfikowano błędne pytanie: ${questionNumber}`);
+            return questionNumber;
+        }
+        
+        console.log('⚠️ Nie można zidentyfikować konkretnego błędnego pytania');
+        return null;
+    }
+
+        private identifyIncorrectQuestions(result: HeadquartersResponse, questionsData: QuestionWithContext[], feedback: Feedback): QuestionWithContext[] {
+        if (!result || result.code === 0) {
+            return [];
+        }
+        
+        const incorrectQuestionId = this.findIncorrectQuestionId(result);
+        
+        if (incorrectQuestionId) {
+            const incorrectQuestion = questionsData.find(q => q.id === incorrectQuestionId);
+            if (incorrectQuestion) {
+                return [{
+                    id: incorrectQuestion.id,
+                    text: incorrectQuestion.text,
+                    feedbacks: [...incorrectQuestion.feedbacks, feedback]
+                }];
+            }
+            return [];
+        }
+        
+        // Jeśli nie można zidentyfikować konkretnego pytania, załóż że wszystkie są błędne
+        console.log('⚠️ Powtarzam wszystkie pytania');
+        return questionsData.map(question => ({
+            id: question.id,
+            text: question.text,
+            feedbacks: [...question.feedbacks, feedback]
+        }));
+    }
+
+    private async prepareFeedback(response: HeadquartersResponse, fullNotebookContent: string, questionsData: QuestionWithContext[]): Promise<Feedback> {
+        const headquartersHint = ('hint' in response && response.hint) ? String(response.hint) : '';
+        const incorrectValue = ('debug' in response && response.debug) ? String(response.debug) : '';
+
         const feedback: Feedback = {
             headquartersHint,
             incorrectValue,
             transformedHint: ''
         };
-        
-        // Sprawdź standardowy format z kodem błędu
-        if (typeof result === 'object' && 'code' in result) {
-            if (result.code === 0) {
-                // Sukces - nie ma błędnych pytań
-                return [];
-            } else if (result.code !== 0) {
-                // Błąd - sprawdź czy można zidentyfikować które pytanie
-                const message = result.message || '';
-                
-                // Szukaj wzorców typu "question 01", "question 02" etc.
-                const questionMatch = message.match(/question (\d+)/i);
-                if (questionMatch) {
-                    const questionNumber = questionMatch[1].padStart(2, '0'); // "01", "02", etc.
-                    console.log(`🎯 Zidentyfikowano błędne pytanie: ${questionNumber}`);
-                    const incorrectQuestion = questionsData.find(q => q.id === questionNumber);
-                    if (incorrectQuestion) {
-                        return [{
-                            id: incorrectQuestion.id,
-                            text: incorrectQuestion.text,
-                            feedbacks: [...incorrectQuestion.feedbacks, feedback]
-                        }];
-                    }
-                    return [];
-                }
-                
-                // Jeśli nie można zidentyfikować konkretnego pytania, załóż że wszystkie są błędne
-                console.log('⚠️ Nie można zidentyfikować konkretnego błędnego pytania - powtarzam wszystkie');
-                return questionsData.map(question => ({
-                    id: question.id,
-                    text: question.text,
-                    feedbacks: [...question.feedbacks, feedback]
-                }));
-            }
+
+        const incorrectQuestionId = this.findIncorrectQuestionId(response);
+        if (incorrectQuestionId) {
+            const incorrectQuestionText = questionsData.find(q => q.id === incorrectQuestionId)?.text ?? '';
+            feedback.transformedHint = await this.prepareImprovedHint(fullNotebookContent, incorrectQuestionId, incorrectQuestionText, incorrectValue, headquartersHint);
         }
+
+        return feedback;
+    }
+
+    private async prepareImprovedHint(fullNotebookContent: string, incorrectQuestionId: string, incorrectQuestionText: string, incorrectValue: string, headquartersHint: string): Promise<string> {
+        console.log(`🧠 Przygotowuję ulepszoną wskazówkę dla pytania ${incorrectQuestionId}: "${incorrectQuestionText}"...`);
+        console.log(`📝 Błędna odpowiedź: "${incorrectValue}"`);
+        console.log(`💡 Wskazówka z centrali: "${headquartersHint}"`);
         
-        return [];
+        try {
+            const notebookPrompt = `
+            <NOTATNIK RAFAŁA>
+            ${fullNotebookContent}
+            </NOTATNIK RAFAŁA>
+            `;
+            const hintPrompt = `
+            Jesteś ekspertem w analizowaniu i rozwiązywaniu zagadek.
+            Kontekstem zagadki jest notatnik Rafała.
+
+            Pytaniem dotyczącym notatnika Rafała było: "${incorrectQuestionText}"
+
+            Model gpt-4.1 próbował odpowiedzieć na to pytanie, ale nie udało mu się.
+
+            BŁĘDNA odpowiedź brzmiała: "${incorrectValue}"
+
+            Wskazówka od twórcy zagadki brzmi: "${headquartersHint}"
+
+            Twoim zadaniem jest przeanalizowanie wszystkich informacji i zwrócenie usprawnionej wskazówki dla modelu gpt-4.1, która pozwoli mu odpowiedzieć zadane uprzednio na pytanie.
+            
+            Zwróć konkretną, praktyczną wskazówkę która pomoże modelowi znaleźć prawidłową odpowiedź.`;
+
+            console.log('🤖 Wysyłam zapytanie do AI o ulepszoną wskazówkę...');
+            
+            const response = await this.openaiService.completion({
+                messages: [
+                    { role: "system", content: notebookPrompt },
+                    { role: "user", content: hintPrompt }
+                ],
+                model: "gpt-4.1"
+            });
+            
+            const improvedHint = (response as any).choices[0].message.content?.trim() || '';
+            
+            console.log('✅ Otrzymano ulepszoną wskazówkę:');
+            console.log(`📋 "${improvedHint}"`);
+            
+            return improvedHint;
+            
+        } catch (error) {
+            console.error(`❌ Błąd podczas przygotowywania ulepszonej wskazówki dla pytania ${incorrectQuestionId}:`, error);
+            return `Błąd podczas przygotowywania wskazówki: ${error}`;
+        }
     }
 
     private getQuestionsData(): any {
