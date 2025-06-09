@@ -12,10 +12,24 @@ import { promisify } from 'util';
 const pdfParse = require('pdf-parse-debugging-disabled');
 const execAsync = promisify(exec);
 
-interface QuestionWithContext {
+interface Question {
     id: string;
     text: string;
-    feedbacks: string[];
+}
+
+interface Feedback {
+    headquartersHint: string;
+    incorrectValue: string;
+    transformedHint: string;
+}
+
+interface Answer {
+    questionId: string;
+    message: string;
+}
+
+interface QuestionWithContext extends Question {
+    feedbacks: Feedback[];
 }
 
 class PdfProcessor {
@@ -133,7 +147,12 @@ class App {
                 return JSON.stringify(data, null, 2);
             });
             
-            const questionsData = JSON.parse(questionsDataString);
+            const questionsDataRaw = JSON.parse(questionsDataString);
+            const questionsData: QuestionWithContext[] = Object.entries(questionsDataRaw).map(([id, text]) => ({
+                id,
+                text: text as string,
+                feedbacks: []
+            }));
             
             // Display final results and costs
             this.displayResults(pdfContent, questionsData);
@@ -144,15 +163,14 @@ class App {
             
             // Wczytaj poprawne odpowiedzi z poprzednich uruchomień
             const correctAnswersPath = path.join(this.cacheDir, 'correct-answers.json');
-            let correctAnswers: Record<string, string> = {};
+            let correctAnswers: Answer[] = [];
             
             if (fs.existsSync(correctAnswersPath)) {
                 try {
-                    const cachedAnswers = JSON.parse(fs.readFileSync(correctAnswersPath, 'utf-8'));
-                    correctAnswers = cachedAnswers;
+                    correctAnswers = JSON.parse(fs.readFileSync(correctAnswersPath, 'utf-8'));
                     console.log('📦 Wczytano poprawne odpowiedzi z cache\'u:');
-                    Object.entries(correctAnswers).forEach(([id, answer]) => {
-                        console.log(`  ${id}: ${answer}`);
+                    correctAnswers.forEach(answer => {
+                        console.log(`  ${answer.questionId}: ${answer.message}`);
                     });
                 } catch (error) {
                     console.log('⚠️ Błąd wczytywania cache\'u odpowiedzi, zaczynam od nowa');
@@ -161,20 +179,21 @@ class App {
                 console.log('📝 Brak cache\'u odpowiedzi - pierwsza sesja');
             }
             
-            let answers: Record<string, string> = {};
-            let questionFeedback: Record<string, string[]> = {}; // Feedback per pytanie
+            let answers: Answer[] = [];
+            // Feedback jest teraz przechowywany w questionsData
             let finalFlag: string | null = null;
             let analysisResult: { success: boolean; flag: string | null; errorMessage: string } | null = null;
             
             // Określ które pytania trzeba zadać (te które nie są w cache'u)
-            const allQuestionIds = Object.keys(questionsData);
-            let questionsToAsk: string[] = allQuestionIds.filter(id => !correctAnswers[id]);
+            const allQuestionIds = questionsData.map(q => q.id);
+            const cachedQuestionIds = correctAnswers.map(answer => answer.questionId);
+            let questionsToAsk: QuestionWithContext[] = questionsData.filter(q => !cachedQuestionIds.includes(q.id));
             
             if (questionsToAsk.length === 0) {
                 console.log('🎉 Wszystkie odpowiedzi są już w cache\'u! Sprawdzam z Centralą...');
             } else {
-                console.log(`📝 Pytania do zadania: ${questionsToAsk.join(', ')}`);
-                console.log(`✅ Pytania z cache'u: ${Object.keys(correctAnswers).join(', ') || 'brak'}`);
+                console.log(`📝 Pytania do zadania: ${questionsToAsk.map(q => q.id).join(', ')}`);
+                console.log(`✅ Pytania z cache'u: ${correctAnswers.map(answer => answer.questionId).join(', ') || 'brak'}`);
             }
             
             const maxIterations = 5;
@@ -188,37 +207,39 @@ class App {
                 } else if (questionsToAsk.length === allQuestionIds.length) {
                     console.log('📝 Zadaję wszystkie pytania (brak cache\'u)');
                 } else {
-                    console.log(`📝 Cache'owanie: zadaję tylko pytania: ${questionsToAsk.join(', ')}`);
+                    console.log(`📝 Cache'owanie: zadaję tylko pytania: ${questionsToAsk.map(q => q.id).join(', ')}`);
                 }
                 
                 // Zadaj pytania (tylko te które nie są w cache'u)
-                let newAnswers: Record<string, string> = {};
+                let newAnswers: Answer[] = [];
                 if (questionsToAsk.length > 0) {
-                    // Przygotuj pytania z kontekstem
-                    const questionsWithContext: QuestionWithContext[] = questionsToAsk.map(questionId => ({
-                        id: questionId,
-                        text: questionsData[questionId],
-                        feedbacks: questionFeedback[questionId] || []
-                    }));
+                    // questionsToAsk już zawiera feedback, więc można bezpośrednio użyć
+                    const questionsWithContext: QuestionWithContext[] = questionsToAsk;
                     
                     newAnswers = await this.answerQuestions(fullNotebookContent, questionsWithContext);
                 }
                 
                 // Połącz nowe odpowiedzi z cache'owanymi poprawnymi
-                answers = { ...correctAnswers, ...newAnswers };
+                answers = [...correctAnswers, ...newAnswers];
                 
                 console.log('\n📋 Finalne odpowiedzi z tej iteracji:');
                 // Sortuj odpowiedzi po numerze pytania
-                const sortedAnswers = Object.entries(answers).sort(([a], [b]) => a.localeCompare(b));
-                sortedAnswers.forEach(([id, answer]) => {
-                    const source = correctAnswers[id] ? '🟢 (cache)' : '🆕 (nowe)';
-                    console.log(`${id}: ${answer} ${source}`);
+                const sortedAnswers = answers.sort((a, b) => a.questionId.localeCompare(b.questionId));
+                sortedAnswers.forEach(answer => {
+                    const isFromCache = correctAnswers.some(cached => cached.questionId === answer.questionId);
+                    const source = isFromCache ? '🟢 (cache)' : '🆕 (nowe)';
+                    console.log(`${answer.questionId}: ${answer.message} ${source}`);
                 });
 
                 // Wyślij wszystkie odpowiedzi do centrali
                 console.log('\n📤 Wysyłanie odpowiedzi do Centrali...');
                 try {
-                    const result = await this.headquartersService.report('notes', answers);
+                    // Konwertuj Answer[] na Record<string, string> dla centrali
+                    const answersRecord: Record<string, string> = {};
+                    answers.forEach(answer => {
+                        answersRecord[answer.questionId] = answer.message;
+                    });
+                    const result = await this.headquartersService.report('notes', answersRecord);
                     console.log('🎯 Odpowiedź z Centrali:', result);
                     
                     // Analizuj odpowiedź z centrali
@@ -236,50 +257,38 @@ class App {
                     } else {
                         console.log(`❌ Iteracja ${iteration}: Niektóre odpowiedzi wymagają poprawy`);
                         
-                        // Określ które pytania są błędne na podstawie odpowiedzi Centrali
-                        const incorrectQuestions = this.identifyIncorrectQuestions(result);
-                        console.log(`🔍 Błędne pytania do poprawienia: ${incorrectQuestions.join(', ')}`);
+                                                // Określ które pytania są błędne na podstawie odpowiedzi Centrali
+                        const incorrectQuestionsWithContext = this.identifyIncorrectQuestions(result, questionsData);
+                        console.log(`🔍 Błędne pytania do poprawienia: ${incorrectQuestionsWithContext.map(q => q.id).join(', ')}`);
                         
                         // Zbuduj nowy cache poprawnych odpowiedzi
-                        correctAnswers = {};
-                        Object.keys(answers).forEach(questionId => {
-                            if (!incorrectQuestions.includes(questionId)) {
-                                correctAnswers[questionId] = answers[questionId];
-                                console.log(`✅ Pytanie ${questionId} zostaje w cache'u jako poprawne`);
+                        correctAnswers = [];
+                        answers.forEach(answer => {
+                            const isIncorrect = incorrectQuestionsWithContext.some(q => q.id === answer.questionId);
+                            if (!isIncorrect) {
+                                correctAnswers.push(answer);
+                                console.log(`✅ Pytanie ${answer.questionId} zostaje w cache'u jako poprawne`);
                             } else {
-                                console.log(`❌ Pytanie ${questionId} pominięte (niepoprawne)`);
+                                console.log(`❌ Pytanie ${answer.questionId} pominięte (niepoprawne)`);
                             }
                         });
                         
                         // Zapisz aktualne poprawne odpowiedzi do pliku
-                        if (Object.keys(correctAnswers).length > 0) {
+                        if (correctAnswers.length > 0) {
                             fs.writeFileSync(correctAnswersPath, JSON.stringify(correctAnswers, null, 2));
-                            console.log(`💾 Zapisano poprawne odpowiedzi do cache'u (${Object.keys(correctAnswers).length} pytań)`);
+                            console.log(`💾 Zapisano poprawne odpowiedzi do cache'u (${correctAnswers.length} pytań)`);
                         }
+                        
+                        // Zaktualizuj questionsData z nowym feedbackiem
+                        incorrectQuestionsWithContext.forEach(questionWithNewFeedback => {
+                            const questionIndex = questionsData.findIndex(q => q.id === questionWithNewFeedback.id);
+                            if (questionIndex !== -1) {
+                                questionsData[questionIndex] = questionWithNewFeedback;
+                            }
+                        });
                         
                         // Przygotuj pytania do zadania w następnej iteracji
-                        questionsToAsk = incorrectQuestions;
-                        
-                        // Dodaj feedback tylko dla błędnych pytań
-                        if (incorrectQuestions.length > 0) {
-                            let feedbackMessage = '';
-                            if ('hint' in result && result.hint) {
-                                feedbackMessage += `Wskazówka: ${result.hint}`;
-                            }
-                            if ('debug' in result && result.debug) {
-                                if (feedbackMessage) feedbackMessage += ' ';
-                                feedbackMessage += `Błędna odpowiedź której NIE WOLNO Ci powtórzyć: ${result.debug}`;
-                            }
-                            if (feedbackMessage) {
-                                // Przypisz feedback do wszystkich błędnych pytań
-                                incorrectQuestions.forEach(questionId => {
-                                    if (!questionFeedback[questionId]) {
-                                        questionFeedback[questionId] = [];
-                                    }
-                                    questionFeedback[questionId].push(feedbackMessage);
-                                });
-                            }
-                        }
+                        questionsToAsk = incorrectQuestionsWithContext;
                         
                         if (iteration === maxIterations) {
                             console.log('⚠️ Osiągnięto maksymalną liczbę iteracji. Kończę z ostatnimi odpowiedziami.');
@@ -289,11 +298,17 @@ class App {
                 } catch (error) {
                     console.error(`❌ Błąd w iteracji ${iteration}:`, error);
                     // Przypisz błąd techniczny do wszystkich pytań które były zadawane
-                    questionsToAsk.forEach(questionId => {
-                        if (!questionFeedback[questionId]) {
-                            questionFeedback[questionId] = [];
+                    const technicalErrorFeedback: Feedback = {
+                        headquartersHint: '',
+                        incorrectValue: '',
+                        transformedHint: `Iteracja ${iteration}: Błąd techniczny: ${error}. Spróbuj inne podejście.`
+                    };
+                    
+                    questionsToAsk.forEach(question => {
+                        const questionIndex = questionsData.findIndex(q => q.id === question.id);
+                        if (questionIndex !== -1) {
+                            questionsData[questionIndex].feedbacks.push(technicalErrorFeedback);
                         }
-                        questionFeedback[questionId].push(`Iteracja ${iteration}: Błąd techniczny: ${error}. Spróbuj inne podejście.`);
                     });
                     
                     if (iteration === maxIterations) {
@@ -310,8 +325,8 @@ class App {
             }
             
             console.log('\n📋 Finalne odpowiedzi:');
-            Object.entries(answers).forEach(([id, answer]) => {
-                console.log(`${id}: ${answer}`);
+            answers.forEach(answer => {
+                console.log(`${answer.questionId}: ${answer.message}`);
             });
 
             // Display final cost summary after all operations
@@ -363,7 +378,7 @@ class App {
         return pdfPath;
     }
 
-    private displayResults(pdfContent: any, questionsData: any) {
+    private displayResults(pdfContent: any, questionsData: QuestionWithContext[]) {
         console.log('\n🎉 All files ready in cache directory!');
         console.log('\nAvailable files:');
         console.log('- ./cache/notatnik-rafala.pdf (Original PDF)');
@@ -376,11 +391,10 @@ class App {
         console.log(`Page 19 OCR text: ${pdfContent.page19Text.substring(0, 200)}...`);
 
         // Display questions preview
-        if (typeof questionsData === 'object' && questionsData) {
-            const questions = Object.entries(questionsData);
-            console.log(`\n📝 Found ${questions.length} questions:`);
-            questions.forEach(([id, question]: [string, any]) => {
-                console.log(`${id}. ${question}`);
+        if (Array.isArray(questionsData) && questionsData.length > 0) {
+            console.log(`\n📝 Found ${questionsData.length} questions:`);
+            questionsData.forEach(question => {
+                console.log(`${question.id}. ${question.text}`);
             });
         }
 
@@ -400,10 +414,10 @@ class App {
         console.log('\n🎯 Ready to analyze PDF content against questions!');
     }
 
-    async answerQuestions(fullNotebookContent: string, questionsWithContext: QuestionWithContext[]): Promise<Record<string, string>> {
+    async answerQuestions(fullNotebookContent: string, questionsWithContext: QuestionWithContext[]): Promise<Answer[]> {
         console.log('\n🔍 Analyzing questions with AI - iterative approach...\n');
         
-        const answers: Record<string, string> = {};
+        const answers: Answer[] = [];
         
         for (const questionWithContext of questionsWithContext) {
             console.log(`\n🎯 Przetwarzam pytanie ${questionWithContext.id}: ${questionWithContext.text}`);
@@ -411,14 +425,32 @@ class App {
             try {
                 // Przygotuj kontekst z feedback dla tego konkretnego pytania
                 const feedbackContext = questionWithContext.feedbacks.length > 0 
-                    ? `\n\nWAŻNE - FEEDBACK DLA TEGO PYTANIA:\n${questionWithContext.feedbacks.join('\n')}\n\nTo są wskazówki z systemu oceniającego - MUSISZ je uwzględnić w swojej analizie!`
+                    ? `\n\nWAŻNE - WSKAZÓWKI DLA TEGO PYTANIA:\n${questionWithContext.feedbacks.map((feedback, index) => {
+                        let parts = [`${index + 1}.`];
+                        if (feedback.headquartersHint) {
+                            parts.push(`Koniecznie uwzględnij przed odpowiedzią: ${feedback.headquartersHint}`);
+                        }
+                        if (feedback.incorrectValue) {
+                            parts.push(`Błędna odpowiedź której NIE WOLNO Ci powtórzyć: ${feedback.incorrectValue}`);
+                        }
+                        if (feedback.transformedHint) {
+                            parts.push(`Dodatkowa wskazówka: ${feedback.transformedHint}`);
+                        }
+                        return parts.join(' ');
+                    }).join('\n')}\n\nTo są wskazówki z systemu oceniającego - MUSISZ je uwzględnić w swojej analizie!`
                     : '';
                 
                 // Wyświetl feedback tylko jeśli istnieje dla tego pytania
                 if (questionWithContext.feedbacks.length > 0) {
                     console.log(`📝 Feedback dla pytania ${questionWithContext.id}:`);
-                    questionWithContext.feedbacks.forEach((hint, index) => {
-                        console.log(`${index + 1}. ${hint}`);
+                    questionWithContext.feedbacks.forEach((feedback, index) => {
+                        console.log(`${index + 1}. Wskazówka z centrali: ${feedback.headquartersHint}`);
+                        if (feedback.incorrectValue) {
+                            console.log(`   Błędna odpowiedź: ${feedback.incorrectValue}`);
+                        }
+                        if (feedback.transformedHint) {
+                            console.log(`   Rozbudowana wskazówka: ${feedback.transformedHint}`);
+                        }
                     });
                     console.log(''); // Pusta linia dla czytelności
                 } else {
@@ -461,19 +493,27 @@ ${feedbackContext}`;
                     model: "gpt-4.1"
                 });
 
-                const answer = (response as any).choices[0].message.content?.trim() || "BRAK ODPOWIEDZI";
-                console.log(`🤖 AI odpowiedź: ${answer}`);
+                const message = (response as any).choices[0].message.content?.trim() || "BRAK ODPOWIEDZI";
+                console.log(`🤖 AI odpowiedź: ${message}`);
                 
-                // Zapisz odpowiedź i przejdź do następnego pytania
-                answers[questionWithContext.id] = answer;
-                console.log(`✅ Odpowiedź ${questionWithContext.id} zapisana: ${answer}`);
+                // Zapisz odpowiedź
+                const answer: Answer = {
+                    questionId: questionWithContext.id,
+                    message
+                };
+                answers.push(answer);
+                console.log(`✅ Odpowiedź ${questionWithContext.id} zapisana: ${message}`);
                 
                 // Pauza między pytaniami
                 await new Promise(resolve => setTimeout(resolve, 500));
                 
             } catch (error) {
                 console.error(`❌ Błąd przy pytaniu ${questionWithContext.id}:`, error);
-                answers[questionWithContext.id] = "BŁĄD TECHNICZNY";
+                const errorAnswer: Answer = {
+                    questionId: questionWithContext.id,
+                    message: "BŁĄD TECHNICZNY"
+                };
+                answers.push(errorAnswer);
             }
             
             console.log(`\n📊 Pytanie ${questionWithContext.id} zakończone`);
@@ -514,8 +554,18 @@ ${feedbackContext}`;
         return { success: false, flag: null, errorMessage: message };
     }
 
-    private identifyIncorrectQuestions(result: any): string[] {
+    private identifyIncorrectQuestions(result: any, questionsData: QuestionWithContext[]): QuestionWithContext[] {
         if (!result) return [];
+        
+        // Przygotuj feedback na podstawie odpowiedzi centrali
+        const headquartersHint = ('hint' in result && result.hint) ? String(result.hint) : '';
+        const incorrectValue = ('debug' in result && result.debug) ? String(result.debug) : '';
+        
+        const feedback: Feedback = {
+            headquartersHint,
+            incorrectValue,
+            transformedHint: ''
+        };
         
         // Sprawdź standardowy format z kodem błędu
         if (typeof result === 'object' && 'code' in result) {
@@ -531,12 +581,24 @@ ${feedbackContext}`;
                 if (questionMatch) {
                     const questionNumber = questionMatch[1].padStart(2, '0'); // "01", "02", etc.
                     console.log(`🎯 Zidentyfikowano błędne pytanie: ${questionNumber}`);
-                    return [questionNumber];
+                    const incorrectQuestion = questionsData.find(q => q.id === questionNumber);
+                    if (incorrectQuestion) {
+                        return [{
+                            id: incorrectQuestion.id,
+                            text: incorrectQuestion.text,
+                            feedbacks: [...incorrectQuestion.feedbacks, feedback]
+                        }];
+                    }
+                    return [];
                 }
                 
                 // Jeśli nie można zidentyfikować konkretnego pytania, załóż że wszystkie są błędne
                 console.log('⚠️ Nie można zidentyfikować konkretnego błędnego pytania - powtarzam wszystkie');
-                return Object.keys(this.getQuestionsData()); // Zwróć wszystkie ID pytań
+                return questionsData.map(question => ({
+                    id: question.id,
+                    text: question.text,
+                    feedbacks: [...question.feedbacks, feedback]
+                }));
             }
         }
         
