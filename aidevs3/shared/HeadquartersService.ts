@@ -49,6 +49,11 @@ export class HeadquartersService {
         return this.requestService.getText(`${this.getApiKeyDataPath()}/phone_questions.txt`);
     }
 
+    async getGPSQuestion(): Promise<{question: string}> {
+        const questionData = await this.requestService.getText(`${this.getApiKeyDataPath()}/gps_question.txt`);
+        return JSON.parse(questionData).question;
+    }
+
     async queryPeople(query: string): Promise<LoopApiResponse> {
         return this.requestService.post<LoopApiBody, LoopApiResponse>(`${this.host}/people`, { apikey: this.apiKey, query });
     }
