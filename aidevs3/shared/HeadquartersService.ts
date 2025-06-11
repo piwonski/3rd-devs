@@ -41,6 +41,10 @@ export class HeadquartersService {
         return this.requestService.getText(`${this.getApiKeyDataPath()}/phone.txt`);
     }
 
+    async getSortedPhoneTranscriptions(): Promise<string> {
+        return this.requestService.getText(`${this.getApiKeyDataPath()}/phone_sorted.json`);
+    }
+
     async getPhoneQuestions(): Promise<string> {
         return this.requestService.getText(`${this.getApiKeyDataPath()}/phone_questions.txt`);
     }

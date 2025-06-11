@@ -8,30 +8,11 @@ import * as path from 'path';
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import type { HeadquartersResponse } from '../shared/sharedTypes';
+import type { QuestionWithContext, Answer, Feedback } from '../shared/agentTypes';
 
 // Use require for pdf-parse-debugging-disabled to avoid type issues
 const pdfParse = require('pdf-parse-debugging-disabled');
 const execAsync = promisify(exec);
-
-interface Question {
-    id: string;
-    text: string;
-}
-
-interface Feedback {
-    headquartersHint: string;
-    incorrectValue: string;
-    transformedHint: string;
-}
-
-interface Answer {
-    questionId: string;
-    message: string;
-}
-
-interface QuestionWithContext extends Question {
-    feedbacks: Feedback[];
-}
 
 class PdfProcessor {
     private openaiService: OpenAIService;

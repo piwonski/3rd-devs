@@ -7,6 +7,7 @@ import { ExpenseCounter } from "../shared/ExpenseCounter";
 import * as path from 'path';
 import { DownloadService } from "../shared/DownloadService";
 import { UnzipService } from "../shared/UnzipService";
+import type { Question } from "../shared/agentTypes";
 
 // Function to decode Unicode escape sequences
 const decodeUnicode = (obj: any): any => {
@@ -33,7 +34,7 @@ interface AgentContext {
 
 interface AgentState {
     context: AgentContext;
-    questions: Record<string, string>;
+    questions: Question[];
 }
 
 export class Agent {
@@ -44,6 +45,7 @@ export class Agent {
     private readonly unzipService: UnzipService;
     private readonly openAIService: OpenAIService;
     private readonly expenseCounter: ExpenseCounter;
+    private state: AgentState;
 
     constructor() {
         const cacheDir = path.join(__dirname, 'cache');
@@ -54,6 +56,13 @@ export class Agent {
         this.unzipService = new UnzipService(cacheDir);
         this.expenseCounter = new ExpenseCounter();
         this.openAIService = new OpenAIService(3072, this.expenseCounter);
+        this.state = {
+            context: {
+                factSummaries: {},
+                phoneTranscriptions: {},
+            },
+            questions: [],
+        }
         console.log(`📁 Using cache directory: ${cacheDir}`);
     }
 
@@ -61,8 +70,10 @@ export class Agent {
         try {
             console.log("🚀 Agent starting...");
             
-            await this.prepareContext();
-            
+            this.state.context = await this.prepareContext();
+            this.state.questions = await this.prepareQuestions();
+
+            this.solveQuestions();
             // Show token usage
             console.log("💰 Token usage summary:");
             const usedTokens = this.expenseCounter.getUsedTokens();
@@ -80,28 +91,41 @@ export class Agent {
             throw error;
         }
     }
+
+    private async solveQuestions() {
+        const maxIterations = 1;
+
+        for (const question of this.state.questions) {
+            for (let iteration = 1; iteration <= maxIterations; iteration++) {
+                console.log(`\n🔄 === ITERACJA ${iteration}/${maxIterations} ===`);
+                await this.solveQuestion(question);
+            }
+        }
+
+    }
+
+    private async solveQuestion(question: Question) {
+        console.log(`🔍 Pytanie: ${question.id} - ${question.text}`);
+
+        const messages = [
+            { role: "system" as const, content: "You are a helpful assistant that can answer questions." },
+            { role: "user" as const, content: question.text }
+        ];
+        
+    }
     
-    private async prepareContext() {
+    private async prepareContext(): Promise<AgentContext> {
         // Ensure cache directory exists
         await this.cacheService.ensureCacheDirectory();
 
         console.log("📞 Fetching phone transcriptions...");
-        const transcriptionsData = await this.cacheService.getOrFetchJson('phone-transcriptions.json', async () => {
-            const data = await this.headquartersService.getPhoneTranscriptions();
+        const transcriptionsData = await this.cacheService.getOrFetchJson('phone_sorted.json', async () => {
+            const data = await this.headquartersService.getSortedPhoneTranscriptions();
             const parsed = JSON.parse(data);
             return decodeUnicode(parsed);
         });
         console.log("✅ Phone transcriptions received", { count: Object.keys(transcriptionsData).length });
         console.log("📞 Phone transcriptions:", transcriptionsData);
-
-        console.log("❓ Fetching phone questions...");
-        const questionsData = await this.cacheService.getOrFetchJson('phone-questions.json', async () => {
-            const data = await this.headquartersService.getPhoneQuestions();
-            const parsed = JSON.parse(data);
-            return decodeUnicode(parsed);
-        });
-        console.log("✅ Phone questions received", { count: Object.keys(questionsData).length });
-        console.log("❓ Phone questions:", questionsData);
 
         // Download and unzip factory files
         await this.downloadAndUnzipPlikiZFabryki();
@@ -124,6 +148,18 @@ export class Agent {
             factSummaries,
             phoneTranscriptions: transcriptionsData,
         }
+    }
+
+    private async prepareQuestions(): Promise<Question[]> {
+        console.log("❓ Fetching phone questions...");
+        const questionsData = await this.cacheService.getOrFetchJson('phone-questions.json', async () => {
+            const data = await this.headquartersService.getPhoneQuestions();
+            const parsed = JSON.parse(data);
+            return decodeUnicode(parsed);
+        });
+        console.log("✅ Phone questions received", { count: Object.keys(questionsData).length });
+        console.log("❓ Phone questions:", questionsData);
+        return Object.entries(questionsData).map(([id, text]) => ({ id, text: text as string }));
     }
 
     private async downloadAndUnzipPlikiZFabryki() {
