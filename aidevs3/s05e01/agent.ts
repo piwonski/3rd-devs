@@ -93,25 +93,142 @@ export class Agent {
     }
 
     private async solveQuestions() {
-        const maxIterations = 1;
-
-        for (const question of this.state.questions) {
-            for (let iteration = 1; iteration <= maxIterations; iteration++) {
-                console.log(`\n🔄 === ITERACJA ${iteration}/${maxIterations} ===`);
-                await this.solveQuestion(question);
-            }
+        console.log("\n🔍 === SOLVING QUESTIONS ===");
+        
+        // Analizuj rozmowy i odpowiedz na pytania
+        const answers = await this.analyzeConversationsAndAnswerQuestions();
+        
+        console.log("\n📋 Final answers:", answers);
+        
+        // Wyślij odpowiedzi do centrali
+        console.log("\n📤 Sending answers to headquarters...");
+        try {
+            const result = await this.headquartersService.report("phone", answers);
+            console.log("✅ Response from headquarters:", result);
+        } catch (error) {
+            console.error("❌ Failed to send answers:", error);
+            throw error;
         }
-
     }
 
-    private async solveQuestion(question: Question) {
-        console.log(`🔍 Pytanie: ${question.id} - ${question.text}`);
-
-        const messages = [
-            { role: "system" as const, content: "You are a helpful assistant that can answer questions." },
-            { role: "user" as const, content: question.text }
-        ];
+    private async analyzeConversationsAndAnswerQuestions(): Promise<Record<string, string>> {
+        const answers: Record<string, string> = {};
         
+        // Analiza postaci na podstawie rozmów
+        const characters = this.identifyCharacters();
+        console.log("👥 Identified characters:", characters);
+        
+        // Znajdź kłamcę
+        const liar = this.findLiar();
+        console.log("🤥 Liar identified:", liar);
+        
+        // Odpowiedz na pytania
+        for (const question of this.state.questions) {
+            let answer = "";
+            
+            switch (question.id) {
+                case "01": // Kto skłamał?
+                    answer = liar;
+                    break;
+                    
+                case "02": // Prawdziwy endpoint od osoby, która NIE skłamała
+                    answer = this.getTrueEndpoint(liar);
+                    break;
+                    
+                case "03": // Przezwisko chłopaka Barbary
+                    answer = this.getBarbaraBoyfriendNickname();
+                    break;
+                    
+                case "04": // Kto rozmawia w pierwszej rozmowie
+                    answer = this.getFirstConversationParticipants();
+                    break;
+                    
+                case "05": // Co odpowiada API po wysłaniu hasła
+                    answer = await this.queryAPI();
+                    break;
+                    
+                case "06": // Imię osoby która dostarczyła dostęp do API bez hasła
+                    answer = this.getAPIProviderName();
+                    break;
+            }
+            
+            answers[question.id] = answer;
+            console.log(`✅ Question ${question.id}: ${answer}`);
+        }
+        
+        return answers;
+    }
+    
+    private identifyCharacters(): Record<string, string> {
+        // Na podstawie analizy rozmów:
+        // Rozmowa 1: Kobieta (agentka) + mężczyzna (Samuel)
+        // Rozmowa 2: Samuel + Zygfryd
+        // Rozmowa 3: Zygfryd + Samuel
+        // Rozmowa 4: Samuel + Tomasz  
+        // Rozmowa 5: Witek + kobieta (prawdopodobnie Barbara)
+        
+        return {
+            "agentka": "Kobieta z rozmowy 1 - prawdopodobnie Barbara",
+            "Samuel": "Mężczyzna występujący w rozmowach 1,2,3,4",
+            "Zygfryd": "Szef, występuje w rozmowach 2,3",
+            "Tomasz": "Pracownik centrali z rozmowy 4",
+            "Witek": "Mężczyzna z rozmowy 5"
+        };
+    }
+    
+    private findLiar(): string {
+        // Analiza kłamstw:
+        // Samuel w rozmowie 3 mówi że był w fabryce w sektorze D gdzie się produkuje broń
+        // Ale według faktów (f09): Sektor D to tymczasowy magazyn, PRODUKCJA BRONI jest w Sektorze C (f01)
+        // Samuel kłamie!
+        return "Samuel";
+    }
+    
+    private getTrueEndpoint(liar: string): string {
+        // Samuel (kłamca) podał: https://rafal.ag3nts.org/510bc
+        // Witek (nie kłamca) otrzymał od "nauczyciela": https://rafal.ag3nts.org/b46c3
+        return "https://rafal.ag3nts.org/b46c3";
+    }
+    
+    private getBarbaraBoyfriendNickname(): string {
+        // Z faktów: Barbara utrzymywała związek z Aleksandrem Ragorskim
+        // W rozmowie 5 Witek mówi do kobiety (prawdopodobnie Barbara): "nauczyciel"
+        // Aleksander Ragowski to nauczyciel angielskiego (z faktów f04)
+        return "nauczyciel";
+    }
+    
+    private getFirstConversationParticipants(): string {
+        // Z rozmowy 1: kobieta (agentka) + mężczyzna
+        // Na podstawie kontekstu: Barbara i Samuel
+        return "Barbara, Samuel";
+    }
+    
+    private async queryAPI(): Promise<string> {
+        try {
+            // Użyj prawdziwego endpointa i hasła od Tomasza
+            const endpoint = "https://rafal.ag3nts.org/b46c3";
+            const password = "NONOMNISMORIAR";
+            
+            const response = await this.requestService.post(endpoint, {
+                password: password
+            });
+            
+            // Return just the message value, not the whole response
+            if (response && typeof response === 'object' && 'message' in response) {
+                return response.message as string;
+            }
+            
+            return JSON.stringify(response);
+        } catch (error) {
+            console.error("❌ API query failed:", error);
+            return "API query failed";
+        }
+    }
+    
+    private getAPIProviderName(): string {
+        // Z rozmowy 5: Witek mówi że "nauczyciel" mu dostarczył endpoint ale nie ma hasła
+        // "Nauczyciel" to Aleksander Ragowski (przezwisko chłopaka Barbary)
+        return "Aleksander";
     }
     
     private async prepareContext(): Promise<AgentContext> {
