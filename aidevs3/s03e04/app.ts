@@ -57,7 +57,7 @@ async function findBarbara(names: string[], cities: string[], wrongCities: Set<s
             if (!visitedNames.has(currentName)) {
                 visitedNames.add(currentName);
                 console.log(`Querying people API for: ${currentName}`);
-                const response = await headquartersService.queryPeople(currentName);
+                const response = await headquartersService.queryUser(currentName);
 
                 console.log('Places for person ', currentName, ':', response);
 
@@ -130,7 +130,7 @@ async function findFlag(names: string[], cities: string[]) {
                 visitedNames.add(currentName);
                 allPeople.add(currentName);
                 console.log(`Querying people API for: ${currentName}`);
-                const response = await headquartersService.queryPeople(currentName);
+                const response = await headquartersService.queryUser(currentName);
 
                 console.log('Places for person ', currentName, ':', response);
 

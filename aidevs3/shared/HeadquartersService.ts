@@ -1,6 +1,6 @@
 import { Environment } from './Environment';
 import { RequestService } from './RequestService';
-import type {ReportBody, HeadquartersResponse, QueryResponse, QueryBody, LoopApiBody, LoopApiResponse} from "./sharedTypes.ts";
+import type {ReportBody, HeadquartersResponse, QueryResponse, QueryBody, LoopApiBody, LoopApiResponse, User} from "./sharedTypes.ts";
 
 export class HeadquartersService {
     private readonly requestService: RequestService;
@@ -49,17 +49,21 @@ export class HeadquartersService {
         return this.requestService.getText(`${this.getApiKeyDataPath()}/phone_questions.txt`);
     }
 
-    async getGPSQuestion(): Promise<{question: string}> {
+    async getGPSQuestion(): Promise<string> {
         const questionData = await this.requestService.getText(`${this.getApiKeyDataPath()}/gps_question.txt`);
         return JSON.parse(questionData).question;
     }
 
-    async queryPeople(query: string): Promise<LoopApiResponse> {
-        return this.requestService.post<LoopApiBody, LoopApiResponse>(`${this.host}/people`, { apikey: this.apiKey, query });
+    async getGPSData(userID: string): Promise<{lat: number, lon: number}> {
+        return this.requestService.post<{userID: string}, {lat: number, lon: number}>(`${this.host}/gps`, { userID });
+    }
+    async queryUser(name: string): Promise<User> {
+        const response = await this.queryDb('database', `SELECT * FROM users WHERE username = '${name}'`);
+        return response.reply[0] as User;
     }
 
-    async queryPlaces(query: string): Promise<LoopApiResponse> {
-        return this.requestService.post<LoopApiBody, LoopApiResponse>(`${this.host}/places`, { apikey: this.apiKey, query });
+    async queryPlaces(query: string): Promise<any> {
+        return this.requestService.post<LoopApiBody, any>(`${this.host}/places`, { apikey: this.apiKey, query });
     }
 
     report<ANSWER>(task: string, answer: ANSWER) {
