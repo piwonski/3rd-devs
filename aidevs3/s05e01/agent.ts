@@ -7,7 +7,7 @@ import { ExpenseCounter } from "../shared/ExpenseCounter";
 import * as path from 'path';
 import { DownloadService } from "../shared/DownloadService";
 import { UnzipService } from "../shared/UnzipService";
-import type { Question } from "../shared/agentTypes";
+import type { Question, Answer, QuestionWithContext, Feedback } from "../shared/agentTypes";
 
 // Function to decode Unicode escape sequences
 const decodeUnicode = (obj: any): any => {
@@ -34,7 +34,9 @@ interface AgentContext {
 
 interface AgentState {
     context: AgentContext;
-    questions: Question[];
+    questions: QuestionWithContext[];
+    answers: Answer[];
+    flag?: string; // Flaga z centrali jeśli została otrzymana
 }
 
 export class Agent {
@@ -62,6 +64,7 @@ export class Agent {
                 phoneTranscriptions: {},
             },
             questions: [],
+            answers: [],
         }
         console.log(`📁 Using cache directory: ${cacheDir}`);
     }
@@ -72,16 +75,28 @@ export class Agent {
             
             this.state.context = await this.prepareContext();
             this.state.questions = await this.prepareQuestions();
+            
+            // Załaduj poprawne odpowiedzi z cache jeśli istnieją
+            await this.loadCorrectAnswersFromCache();
 
-            this.solveQuestions();
-            // Show token usage
-            console.log("💰 Token usage summary:");
+            // If we have all answers but no flag, try resubmitting
+            if (this.state.answers.length === this.state.questions.length && !this.state.flag) {
+                console.log("\n🔄 All answers present but no flag - resubmitting to headquarters...");
+                await this.resubmitAnswers();
+            } else {
+                await this.solveQuestions();
+            }
+            
+            console.log("\n💰 ================================");
+            console.log("💰 PODSUMOWANIE KOSZTÓW");
+            console.log("💰 ================================");
             const usedTokens = this.expenseCounter.getUsedTokens();
             const costBreakdown = this.expenseCounter.getEstimatedCost('gpt-4.1');
-            console.log(`📊 Tokens used - Input: ${usedTokens.input}, Output: ${usedTokens.output}, Total: ${usedTokens.total}`);
-            console.log(`💵 Estimated cost: $${costBreakdown.totalCost.toFixed(4)} (${costBreakdown.model})`);
+            console.log(`📊 Tokeny - Input: ${usedTokens.input}, Output: ${usedTokens.output}, Total: ${usedTokens.total}`);
+            console.log(`💵 Szacowany koszt: $${costBreakdown.totalCost.toFixed(4)} (${costBreakdown.model})`);
+            console.log("💰 ================================");
             
-            console.log("✅ Agent completed successfully");
+            console.log("\n✅ Agent completed successfully");
             
         } catch (error) {
             const errorInfo = error instanceof Error 
@@ -95,142 +110,114 @@ export class Agent {
     private async solveQuestions() {
         console.log("\n🔍 === SOLVING QUESTIONS ===");
         
-        // Analizuj rozmowy i odpowiedz na pytania
-        const answers = await this.analyzeConversationsAndAnswerQuestions();
+        const maxIterationsPerQuestion = 3;
         
-        console.log("\n📋 Final answers:", answers);
+        // Rozwiązuj pytania jedno po drugim
+        for (const question of this.state.questions) {
+            // Sprawdź czy pytanie już zostało rozwiązane
+            const existingAnswer = this.state.answers.find(a => a.questionId === question.id);
+            if (existingAnswer) {
+                console.log(`\n✅ Question ${question.id} already solved: ${existingAnswer.message}`);
+                continue;
+            }
+            
+            console.log(`\n🔍 Solving question ${question.id}: ${question.text}`);
+            
+            // Analiza pytania - co potrzebujemy żeby odpowiedzieć
+            const strategy = await this.analyzeQuestionStrategy(question);
+            console.log(`📋 Strategy: ${strategy}`);
+            
+            let questionResolved = false;
+            let iteration = 1;
+            
+            while (!questionResolved && iteration <= maxIterationsPerQuestion) {
+                console.log(`\n🔄 Iteration ${iteration}/${maxIterationsPerQuestion} for question ${question.id}`);
+                
+                // Rozwiąż pytanie na podstawie strategii
+                const answer = await this.solveQuestion(question, strategy);
+                console.log(`💭 Generated answer for ${question.id}: ${answer}`);
+                
+                // Wyślij odpowiedzi do centrali (dotychczasowe + nowa)
+                const result = await this.submitCurrentAnswers(question.id, answer);
+                
+                if (result.code === 0) {
+                    // Odpowiedź zaakceptowana - zapisz do stanu
+                    await this.addAnswerForQuestionToState(question.id, answer);
+                    console.log(`🎉 Question ${question.id} accepted and saved to state!`);
+                    
+                    // Sprawdź czy otrzymaliśmy flagę
+                    if (result.message && result.message.includes('FLG:')) {
+                        this.state.flag = result.message;
+                        console.log(`🏁 FLAGA OTRZYMANA: ${result.message}`);
+                    }
+                    
+                    questionResolved = true;
+                } else {
+                    // Sprawdź czy błąd dotyczy aktualnego pytania czy kolejnego
+                    const errorQuestionId = this.extractQuestionIdFromError(result.message);
+                    
+                    if (errorQuestionId === question.id) {
+                        // Błąd dotyczy aktualnego pytania - trzeba je poprawić
+                        console.log(`❌ Question ${question.id} rejected (iteration ${iteration}): ${result.message}`);
+                        
+                        if (iteration < maxIterationsPerQuestion) {
+                            // Dodaj feedback do pytania
+                            question.feedbacks.push({
+                                headquartersHint: result.message,
+                                incorrectValue: answer,
+                                transformedHint: result.message
+                            });
+                            console.log(`➡️  Will retry with feedback in next iteration...`);
+                            iteration++;
+                        } else {
+                            console.log(`⚠️  Max iterations (${maxIterationsPerQuestion}) reached for question ${question.id}.`);
+                            console.log(`❌ Cannot proceed with remaining questions - centrala won't provide flag with incorrect answers.`);
+                            console.log(`📋 Stopping execution. Please review and fix the issue manually.`);
+                            return; // Przerwij całą funkcję
+                        }
+                    } else {
+                        // Błąd dotyczy kolejnego pytania - aktualne pytanie jest poprawne
+                        await this.addAnswerForQuestionToState(question.id, answer);
+                        console.log(`🎉 Question ${question.id} accepted and saved to state! (Error message refers to next question: ${errorQuestionId})`);
+                        console.log(`ℹ️  Next question ${errorQuestionId} will need attention: ${result.message}`);
+                        questionResolved = true;
+                    }
+                }
+            }
+        }
         
-        // Wyślij odpowiedzi do centrali
-        console.log("\n📤 Sending answers to headquarters...");
-        try {
-            const result = await this.headquartersService.report("phone", answers);
-            console.log("✅ Response from headquarters:", result);
-        } catch (error) {
-            console.error("❌ Failed to send answers:", error);
-            throw error;
+        console.log("\n📋 Final answers:", this.state.answers);
+        
+        // Sprawdź czy wszystkie pytania zostały rozwiązane
+        const allQuestionsAnswered = this.state.answers.length === this.state.questions.length;
+        if (allQuestionsAnswered) {
+            console.log("\n🎉 ================================");
+            console.log("🏆 ZADANIE UKOŃCZONE POMYŚLNIE!");
+            console.log("🎯 Wszystkie pytania zostały rozwiązane!");
+            
+            if (this.state.flag) {
+                console.log(`🏁 FLAGA: ${this.state.flag}`);
+            } else {
+                console.log("⚠️  Brak flagi - sprawdź czy wszystkie odpowiedzi są poprawne");
+            }
+            
+            console.log("🎉 ================================");
+        } else {
+            console.log(`\n⚠️  Zadanie niepełne: ${this.state.answers.length}/${this.state.questions.length} pytań rozwiązanych`);
         }
     }
 
-    private async analyzeConversationsAndAnswerQuestions(): Promise<Record<string, string>> {
-        const answers: Record<string, string> = {};
+    private extractQuestionIdFromError(errorMessage: string): string | null {
+        // Parsuj różne formaty wiadomości błędów od centrali
+        // Przykłady:
+        // "Answer for question 01 is incorrect"
+        // "Answer for question 02 is too short"
+        // "Answer for question 03 is too long"
         
-        // Analiza postaci na podstawie rozmów
-        const characters = this.identifyCharacters();
-        console.log("👥 Identified characters:", characters);
-        
-        // Znajdź kłamcę
-        const liar = this.findLiar();
-        console.log("🤥 Liar identified:", liar);
-        
-        // Odpowiedz na pytania
-        for (const question of this.state.questions) {
-            let answer = "";
-            
-            switch (question.id) {
-                case "01": // Kto skłamał?
-                    answer = liar;
-                    break;
-                    
-                case "02": // Prawdziwy endpoint od osoby, która NIE skłamała
-                    answer = this.getTrueEndpoint(liar);
-                    break;
-                    
-                case "03": // Przezwisko chłopaka Barbary
-                    answer = this.getBarbaraBoyfriendNickname();
-                    break;
-                    
-                case "04": // Kto rozmawia w pierwszej rozmowie
-                    answer = this.getFirstConversationParticipants();
-                    break;
-                    
-                case "05": // Co odpowiada API po wysłaniu hasła
-                    answer = await this.queryAPI();
-                    break;
-                    
-                case "06": // Imię osoby która dostarczyła dostęp do API bez hasła
-                    answer = this.getAPIProviderName();
-                    break;
-            }
-            
-            answers[question.id] = answer;
-            console.log(`✅ Question ${question.id}: ${answer}`);
-        }
-        
-        return answers;
+        const match = errorMessage.match(/question (\d+)/i);
+        return match ? match[1] : null;
     }
-    
-    private identifyCharacters(): Record<string, string> {
-        // Na podstawie analizy rozmów:
-        // Rozmowa 1: Kobieta (agentka) + mężczyzna (Samuel)
-        // Rozmowa 2: Samuel + Zygfryd
-        // Rozmowa 3: Zygfryd + Samuel
-        // Rozmowa 4: Samuel + Tomasz  
-        // Rozmowa 5: Witek + kobieta (prawdopodobnie Barbara)
-        
-        return {
-            "agentka": "Kobieta z rozmowy 1 - prawdopodobnie Barbara",
-            "Samuel": "Mężczyzna występujący w rozmowach 1,2,3,4",
-            "Zygfryd": "Szef, występuje w rozmowach 2,3",
-            "Tomasz": "Pracownik centrali z rozmowy 4",
-            "Witek": "Mężczyzna z rozmowy 5"
-        };
-    }
-    
-    private findLiar(): string {
-        // Analiza kłamstw:
-        // Samuel w rozmowie 3 mówi że był w fabryce w sektorze D gdzie się produkuje broń
-        // Ale według faktów (f09): Sektor D to tymczasowy magazyn, PRODUKCJA BRONI jest w Sektorze C (f01)
-        // Samuel kłamie!
-        return "Samuel";
-    }
-    
-    private getTrueEndpoint(liar: string): string {
-        // Samuel (kłamca) podał: https://rafal.ag3nts.org/510bc
-        // Witek (nie kłamca) otrzymał od "nauczyciela": https://rafal.ag3nts.org/b46c3
-        return "https://rafal.ag3nts.org/b46c3";
-    }
-    
-    private getBarbaraBoyfriendNickname(): string {
-        // Z faktów: Barbara utrzymywała związek z Aleksandrem Ragorskim
-        // W rozmowie 5 Witek mówi do kobiety (prawdopodobnie Barbara): "nauczyciel"
-        // Aleksander Ragowski to nauczyciel angielskiego (z faktów f04)
-        return "nauczyciel";
-    }
-    
-    private getFirstConversationParticipants(): string {
-        // Z rozmowy 1: kobieta (agentka) + mężczyzna
-        // Na podstawie kontekstu: Barbara i Samuel
-        return "Barbara, Samuel";
-    }
-    
-    private async queryAPI(): Promise<string> {
-        try {
-            // Użyj prawdziwego endpointa i hasła od Tomasza
-            const endpoint = "https://rafal.ag3nts.org/b46c3";
-            const password = "NONOMNISMORIAR";
-            
-            const response = await this.requestService.post(endpoint, {
-                password: password
-            });
-            
-            // Return just the message value, not the whole response
-            if (response && typeof response === 'object' && 'message' in response) {
-                return response.message as string;
-            }
-            
-            return JSON.stringify(response);
-        } catch (error) {
-            console.error("❌ API query failed:", error);
-            return "API query failed";
-        }
-    }
-    
-    private getAPIProviderName(): string {
-        // Z rozmowy 5: Witek mówi że "nauczyciel" mu dostarczył endpoint ale nie ma hasła
-        // "Nauczyciel" to Aleksander Ragowski (przezwisko chłopaka Barbary)
-        return "Aleksander";
-    }
-    
+
     private async prepareContext(): Promise<AgentContext> {
         // Ensure cache directory exists
         await this.cacheService.ensureCacheDirectory();
@@ -242,7 +229,6 @@ export class Agent {
             return decodeUnicode(parsed);
         });
         console.log("✅ Phone transcriptions received", { count: Object.keys(transcriptionsData).length });
-        console.log("📞 Phone transcriptions:", transcriptionsData);
 
         // Download and unzip factory files
         await this.downloadAndUnzipPlikiZFabryki();
@@ -251,14 +237,12 @@ export class Agent {
         const facts: Record<string, string> = await this.readFacts();
 
         console.log("✅ Facts loaded", { count: Object.keys(facts).length });
-        console.log("📚 Facts:", facts);
 
         // Create summaries of facts
         const factSummaries = await this.cacheService.getOrFetchJson('fact-summaries.json', async () => {
             return await this.createFactSummaries(facts);
         });
         console.log("✅ Fact summaries ready");
-        console.log("📝 Fact summaries:", factSummaries);
 
         console.log("📋 Data summary completed");
         return {
@@ -267,7 +251,7 @@ export class Agent {
         }
     }
 
-    private async prepareQuestions(): Promise<Question[]> {
+    private async prepareQuestions(): Promise<QuestionWithContext[]> {
         console.log("❓ Fetching phone questions...");
         const questionsData = await this.cacheService.getOrFetchJson('phone-questions.json', async () => {
             const data = await this.headquartersService.getPhoneQuestions();
@@ -276,7 +260,11 @@ export class Agent {
         });
         console.log("✅ Phone questions received", { count: Object.keys(questionsData).length });
         console.log("❓ Phone questions:", questionsData);
-        return Object.entries(questionsData).map(([id, text]) => ({ id, text: text as string }));
+        return Object.entries(questionsData).map(([id, text]) => ({ 
+            id, 
+            text: text as string,
+            feedbacks: [] as Feedback[]
+        }));
     }
 
     private async downloadAndUnzipPlikiZFabryki() {
@@ -341,6 +329,292 @@ DON'T use bullet points, paragraphs, etc.
         }
         
         return summaries;
+    }
+
+    private async analyzeQuestionStrategy(question: QuestionWithContext): Promise<string> {
+        const strategyPrompt = `
+Przeanalizuj poniższe pytanie i wybierz jedną z dwóch strategii:
+
+ANALIZA DANYCH
+- Użyj gdy odpowiedź można znaleźć w rozmowach telefonicznych lub faktach z fabryki
+- Analizuj transkrypcje, fakty, szukaj wzorców, kłamstw, niespójności
+
+WYWOŁANIE API  
+- Użyj gdy pytanie explicite pyta o odpowiedź z API lub endpoint
+- Wymaga znalezienia endpointu i hasła w rozmowach, następnie wywołania API
+
+Pytanie: "${question.text}"
+
+Odpowiedz TYLKO jedną z opcji:
+- "ANALIZA DANYCH" - jeśli trzeba analizować dane
+- "WYWOŁANIE API" - jeśli trzeba wywołać API
+`;
+
+        const messages = [
+            { role: "system" as const, content: "Wybierz strategię rozwiązania pytania. Odpowiedz tylko 'ANALIZA DANYCH' lub 'WYWOŁANIE API'." },
+            { role: "user" as const, content: strategyPrompt }
+        ];
+        
+        const response = await this.openAIService.completion({ messages });
+        return (response as any).choices[0].message.content?.trim() || "";
+    }
+
+    private async solveQuestion(question: QuestionWithContext, strategy: string): Promise<string> {
+        const contextData = {
+            phoneTranscriptions: this.state.context.phoneTranscriptions,
+            factSummaries: this.state.context.factSummaries
+        };
+
+        // Przygotuj feedback context jeśli istnieje
+        const feedbackContext = question.feedbacks.length > 0
+            ? `\n\nFEEDBACK Z POPRZEDNICH PRÓB:\n${question.feedbacks.map((feedback, index) => 
+                `${index + 1}. Błąd: "${feedback.headquartersHint}" (poprzednia odpowiedź: "${feedback.incorrectValue}")`
+            ).join('\n')}`
+            : '';
+
+        if (strategy.includes("WYWOŁANIE API")) {
+            return await this.solveWithAPIStrategy(question, contextData, feedbackContext);
+        } else {
+            // Default to data analysis strategy
+            return await this.solveWithDataStrategy(question, contextData, feedbackContext);
+        }
+    }
+
+    private async solveWithDataStrategy(question: QuestionWithContext, contextData: any, feedbackContext: string): Promise<string> {
+        // Przygotuj już udzielone poprawne odpowiedzi
+        const correctAnswersContext = this.state.answers.length > 0 
+            ? `\n\nJUŻ UDZIELONE POPRAWNE ODPOWIEDZI:\n${this.state.answers.map(answer => {
+                const questionText = this.state.questions.find(q => q.id === answer.questionId)?.text || 'Unknown question';
+                return `${answer.questionId}. ${questionText}\nOdpowiedź: ${answer.message}`;
+            }).join('\n\n')}`
+            : '';
+
+        const solvingPrompt = `
+Odpowiedz na pytanie analizując dostępne dane.
+
+Pytanie: "${question.text}"
+${feedbackContext}
+${correctAnswersContext}
+
+PRZYKŁAD ANALIZY SEKWENCJI ROZMÓW:
+Jeśli rozmowa1 kończy się: "mam Zygfryda na drugiej linii [*dźwięk odkładanej słuchawki*]"
+A rozmowa2 zaczyna się: "Witaj Samuelu. Rozmawiałeś z nią?"
+To znaczy, że Zygfryd dzwoni do Samuela po tym jak Samuel skończył rozmowę z "nią" w rozmowie1.
+Więc w rozmowie1 rozmawiali Samuel i ta "ona".
+
+Dostępne dane:
+ROZMOWY TELEFONICZNE:
+${JSON.stringify(contextData.phoneTranscriptions, null, 2)}
+
+FAKTY Z FABRYKI:
+${JSON.stringify(contextData.factSummaries, null, 2)}
+
+INSTRUKCJE:
+- Analizuj dokładnie rozmowy i fakty
+- Szukaj niespójności, kłamstw, konfliktów między tym co ktoś mówi a faktami
+- Identyfikuj postacie na podstawie kontekstu rozmów
+- KRYTYCZNE: Analizuj SEKWENCJĘ rozmów - sprawdź jak kończy się jedna rozmowa a jak zaczyna następna
+- ŁĄCZ INFORMACJE między rozmowami (np. jeśli rozmowa1 kończy się "dzwonię do X", to rozmowa2 może zaczynać się od X dzwoniącego)
+- Sprawdzaj kto do kogo dzwoni i w jakiej kolejności
+- Dla identyfikacji rozmówców: użyj końca jednej rozmowy + początku następnej + potwierdzeń w tekście
+- WYKORZYSTAJ już udzielone poprawne odpowiedzi do analizy powiązań
+- Jeśli jest feedback, uwzględnij go i popraw błędy
+- ODPOWIEDŹ MUSI BYĆ BARDZO KRÓTKA (1-3 słowa maksymalnie: imię, URL, słowo kluczowe)
+- Odpowiedz w formacie JSON:
+
+{
+  "thinking": "Twój proces myślenia i analizy z uwzględnieniem poprzednich odpowiedzi",
+  "answer": "Bardzo krótka odpowiedź (np. Samuel, https://rafal.ag3nts.org/b46c3, Witek)"
+}
+`;
+
+        const messages = [
+            { role: "system" as const, content: "Jesteś ekspertem od analizy rozmów i faktów. Daj bardzo krótką odpowiedź w formacie JSON." },
+            { role: "user" as const, content: solvingPrompt }
+        ];
+
+        const response = await this.openAIService.completion({ messages });
+        const responseText = (response as any).choices[0].message.content?.trim() || "";
+
+        try {
+            const parsed = JSON.parse(responseText);
+            console.log(`🧠 Thinking: ${parsed.thinking}`);
+            return parsed.answer;
+        } catch (error) {
+            console.error("❌ Failed to parse JSON response:", responseText);
+            return responseText; // Fallback to raw response
+        }
+    }
+
+    private async solveWithAPIStrategy(question: QuestionWithContext, contextData: any, feedbackContext: string): Promise<string> {
+        // Przygotuj już udzielone poprawne odpowiedzi
+        const correctAnswersContext = this.state.answers.length > 0 
+            ? `\n\nJUŻ UDZIELONE POPRAWNE ODPOWIEDZI:\n${this.state.answers.map(answer => {
+                const questionText = this.state.questions.find(q => q.id === answer.questionId)?.text || 'Unknown question';
+                return `${answer.questionId}. ${questionText}\nOdpowiedź: ${answer.message}`;
+            }).join('\n\n')}`
+            : '';
+
+        const solvingPrompt = `
+Znajdź endpoint i hasło w rozmowach telefonicznych aby odpowiedzieć na pytanie.
+
+Pytanie: "${question.text}"
+${feedbackContext}
+${correctAnswersContext}
+
+Dostępne dane:
+ROZMOWY TELEFONICZNE:
+${JSON.stringify(contextData.phoneTranscriptions, null, 2)}
+
+INSTRUKCJE:
+- Przeanalizuj rozmowy i znajdź endpoint API oraz hasło
+- WYKORZYSTAJ już udzielone poprawne odpowiedzi (np. kto skłamał) do wyboru właściwego endpointu
+- Jeśli jest feedback, uwzględnij go i popraw błędy
+- Odpowiedz w formacie JSON:
+
+{
+  "thinking": "Twój proces myślenia z uwzględnieniem poprzednich odpowiedzi",
+  "endpoint": "URL endpointu do wywołania",
+  "body": {"password": "hasło do przesłania"}
+}
+`;
+
+        const messages = [
+            { role: "system" as const, content: "Znajdź endpoint i hasło w rozmowach. Odpowiedz w formacie JSON." },
+            { role: "user" as const, content: solvingPrompt }
+        ];
+
+        const response = await this.openAIService.completion({ messages });
+        const responseText = (response as any).choices[0].message.content?.trim() || "";
+
+        try {
+            const parsed = JSON.parse(responseText);
+            console.log(`🧠 Thinking: ${parsed.thinking}`);
+            console.log(`🔗 Calling API: ${parsed.endpoint}`);
+            
+            // Wywołaj API
+            const apiResponse = await this.requestService.post(parsed.endpoint, parsed.body);
+            
+            // Zwróć odpowiedź z API
+            if (apiResponse && typeof apiResponse === 'object' && 'message' in apiResponse) {
+                return apiResponse.message as string;
+            }
+            
+            return JSON.stringify(apiResponse);
+        } catch (error) {
+            console.error("❌ Failed to parse JSON or call API:", responseText, error);
+            return responseText; // Fallback to raw response
+        }
+    }
+
+    private async submitCurrentAnswers(currentQuestionId?: string, currentAnswer?: string) {
+        // Przygotuj odpowiedzi - wypełnij puste miejsca dla pytań bez odpowiedzi
+        const answersToSubmit: Record<string, string> = {};
+        
+        for (const question of this.state.questions) {
+            if (question.id === currentQuestionId && currentAnswer !== undefined) {
+                // Użyj bieżącej odpowiedzi (jeszcze nie zapisanej w state)
+                answersToSubmit[question.id] = currentAnswer;
+            } else {
+                // Użyj odpowiedzi z state
+                const existingAnswer = this.state.answers.find(a => a.questionId === question.id);
+                answersToSubmit[question.id] = existingAnswer?.message || "";
+            }
+        }
+
+        console.log("\n📤 Sending answers to headquarters...", answersToSubmit);
+        
+        try {
+            const result = await this.headquartersService.report("phone", answersToSubmit);
+            console.log("✅ Response from headquarters:", result);
+            
+            // Check for flag in response
+            if (result.message && result.message.includes('FLG:')) {
+                this.state.flag = result.message;
+                console.log(`🏁 FLAGA OTRZYMANA: ${result.message}`);
+                // Save to cache immediately when we get the flag
+                await this.saveCorrectAnswersToCache();
+            }
+            
+            return result;
+        } catch (error) {
+            console.error("❌ Failed to send answers:", error);
+            throw error;
+        }
+    }
+
+    private async addAnswerForQuestionToState(questionId: string, answer: string): Promise<void> {
+        const existingAnswerIndex = this.state.answers.findIndex(a => a.questionId === questionId);
+        if (existingAnswerIndex >= 0) {
+            this.state.answers[existingAnswerIndex].message = answer;
+        } else {
+            this.state.answers.push({ questionId: questionId, message: answer });
+        }
+        
+        // Zapisz do cache natychmiast
+        await this.saveCorrectAnswersToCache();
+    }
+
+    private async loadCorrectAnswersFromCache(): Promise<void> {
+        try {
+            if (await this.cacheService.fileExists('correct-answers.json')) {
+                const cachedData = await this.cacheService.getOrFetchJson('correct-answers.json', async () => ({ answers: [], flag: undefined }));
+                
+                // Obsłuż różne formaty cache (stary format - tablica, nowy format - obiekt)
+                if (Array.isArray(cachedData)) {
+                    // Stary format - tylko odpowiedzi
+                    this.state.answers = cachedData as Answer[];
+                    this.state.flag = undefined;
+                } else {
+                    // Nowy format - obiekt z odpowiedziami i flagą
+                    this.state.answers = cachedData.answers || [];
+                    this.state.flag = cachedData.flag;
+                }
+                
+                console.log(`📦 Loaded ${this.state.answers.length} correct answers from cache:`, this.state.answers);
+                if (this.state.flag) {
+                    console.log(`📦 Loaded flag from cache: ${this.state.flag}`);
+                }
+            } else {
+                console.log("📦 No cached answers found, starting fresh");
+            }
+        } catch (error) {
+            console.error("❌ Failed to load cached answers:", error);
+            this.state.answers = [];
+            this.state.flag = undefined;
+        }
+    }
+
+    private async saveCorrectAnswersToCache(): Promise<void> {
+        try {
+            const cacheData = {
+                answers: this.state.answers,
+                flag: this.state.flag
+            };
+            await this.cacheService.writeFile('correct-answers.json', JSON.stringify(cacheData, null, 2));
+            console.log(`💾 Saved ${this.state.answers.length} correct answers to cache`);
+            if (this.state.flag) {
+                console.log(`💾 Saved flag to cache: ${this.state.flag}`);
+            }
+        } catch (error) {
+            console.error("❌ Failed to save answers to cache:", error);
+        }
+    }
+
+    private async resubmitAnswers() {
+        console.log("\n🔄 Resubmitting all answers to headquarters...");
+        const result = await this.submitCurrentAnswers();
+        
+        if (result.code === 0) {
+            console.log("✅ Answers resubmitted successfully!");
+            if (this.state.flag) {
+                console.log(`🏁 FLAGA: ${this.state.flag}`);
+            } else {
+                console.log("⚠️ Still no flag received - some answers might be incorrect");
+            }
+        } else {
+            console.log("❌ Resubmission failed:", result.message);
+        }
     }
 }
 
