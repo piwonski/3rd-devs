@@ -1,6 +1,6 @@
 import { Environment } from './Environment';
 import { RequestService } from './RequestService';
-import type {ReportBody, HeadquartersResponse, QueryResponse, QueryBody, LoopApiBody, LoopApiResponse, User} from "./sharedTypes.ts";
+import type {ReportBody, HeadquartersResponse, QueryResponse, QueryBody, LoopApiBody, LoopApiResponse, User, GPSResponse} from "./sharedTypes.ts";
 
 export class HeadquartersService {
     private readonly requestService: RequestService;
@@ -54,8 +54,8 @@ export class HeadquartersService {
         return JSON.parse(questionData).question;
     }
 
-    async getGPSData(userID: string): Promise<{lat: number, lon: number}> {
-        return this.requestService.post<{userID: string}, {lat: number, lon: number}>(`${this.host}/gps`, { userID });
+    async getGPSData(userID: string): Promise<GPSResponse> {
+        return this.requestService.post<{userID: string}, GPSResponse>(`${this.host}/gps`, { userID });
     }
     async queryUser(name: string): Promise<User> {
         const response = await this.queryDb('database', `SELECT * FROM users WHERE username = '${name}'`);

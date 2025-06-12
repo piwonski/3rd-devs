@@ -37,3 +37,11 @@ export interface User {
     is_active: number,
     lastlog: string,
 }
+
+export interface GPSResponse {
+    code: number;
+    message: {
+        lat: number;
+        lon: number;
+    };
+}

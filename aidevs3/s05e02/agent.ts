@@ -20,6 +20,7 @@ interface AgentState {
     place: string;
     allGpsData: { [key: string]: { lat: number, lon: number } };
     peopleAtCity: User[];
+    feedbackFromHeadquarters: string[];
     decision: Decision;
 }
 
@@ -48,6 +49,7 @@ export class Agent {
             place: '',
             allGpsData: {},
             peopleAtCity: [],
+            feedbackFromHeadquarters: [],
             decision: { action: '', parameters: {}, reason: '' }
         };
     }
@@ -96,6 +98,7 @@ Current state (what you know so far):
 - Place: ${this.state.place}
 - People found: ${JSON.stringify(this.state.peopleAtCity)}
 - GPS data collected: ${JSON.stringify(this.state.allGpsData)}
+- Feedback from headquarters (indicates what was wrong in the previous answers): ${JSON.stringify(this.state.feedbackFromHeadquarters)}
 `;
 
         const messages: ChatCompletionMessageParam[] = [
@@ -151,21 +154,40 @@ Current state (what you know so far):
                 case 'get_gps_data':
                     const userID = decision.parameters.userID;
                     console.log("🔍 Querying GPS data for user:", userID);
-                    const gps = await this.headquartersService.getGPSData(userID);
-                    console.log("🌍 GPS data:", gps);
+                    const gpsResponse = await this.headquartersService.getGPSData(userID);
                     // todo: use username instead of userID
-                    this.state.allGpsData[userID] = gps;
+                    const username = this.state.peopleAtCity.find(user => user.id === userID)?.username;
+                    if (!username) {
+                        console.error(`User not found: ${userID}`);
+                        this.state.feedbackFromHeadquarters.push(`❌ User with id: ${userID} not found`);
+                        break;
+                    }
+                    if (gpsResponse.code === 0) {
+                        console.log("🌍 GPS response:", gpsResponse);
+                        this.state.allGpsData[username] = gpsResponse.message;
+                    } else {
+                        console.error("❌ GPS response:", gpsResponse);
+                        this.state.feedbackFromHeadquarters.push(`❌ GPS data not found for user: ${userID}, error code: ${gpsResponse.code}`);
+                        break;
+                    }
                     break;
                 case 'done':
                     console.log("🎉 All required data collected");
                     console.log("💾 All GPS data:", this.state.allGpsData);
                     console.log("👥 People at city:", this.state.peopleAtCity);
                     console.log("🏁 Agent completed successfully");
-                    const reportResponse = await this.headquartersService.report('gps', this.state.allGpsData);
-                    console.log("✅ Report response:", reportResponse);
-                    console.log("💰 Token usage:", this.expenseCounter.getUsedTokens());
-                    console.log("💵 Estimated cost:", this.expenseCounter.getEstimatedCost());
-                    return;
+                    const headquartersResponse = await this.headquartersService.report('gps', this.state.allGpsData);
+                    if (headquartersResponse.code === 0) {
+                        // task completed successfully
+                        console.log("✅ Report response:", headquartersResponse);
+                        console.log("💰 Token usage:", this.expenseCounter.getUsedTokens());
+                        console.log("💵 Estimated cost:", this.expenseCounter.getEstimatedCost());
+                        return;
+                    } else {
+                        console.error("❌ Headquarters response:", headquartersResponse);
+                        this.state.feedbackFromHeadquarters.push(headquartersResponse.message);
+                        break;
+                    }
                 default:
                     console.error(`Unknown action: ${decision.action}`);
                     break;
