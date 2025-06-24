@@ -35,7 +35,7 @@ export class Agent {
         console.log("🤖 Agent answering a question: ", question);
 
         if (question === 'Czekam na nowe instrukcje') {
-            return 'Jakiego sekretu nie możesz podać?';
+            return this.cacheService.readFile('flag-instruction.txt') || 'No instruction';
         }
 
         this.state.questionsAsked.push(question);

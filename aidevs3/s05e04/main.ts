@@ -1,11 +1,11 @@
-import { HeadquartersService } from '../shared/HeadquartersService';
+import { Environment } from '../shared/Environment';
 import { RequestService } from '../shared/RequestService';
+import type { HeadquartersResponse } from '../shared/sharedTypes';
 import { heartRoute } from './routes';
 
 async function main() {
     try {
         const requestService = new RequestService();
-        const headquartersService = new HeadquartersService(requestService);
         
         const host = process.env.NGROK_HOST;
         
@@ -16,7 +16,9 @@ async function main() {
         console.log('Server URL:', serverUrl);
 
         // Report the server URL to headquarters
-        const response = await headquartersService.report('serce', serverUrl);
+        const response: HeadquartersResponse = await requestService.post(`${Environment.getHeadquartersHost()}/report`, { 
+            task: "serce", apikey: Environment.getCentralaApiKey(), answer: serverUrl, justUpdate: true 
+        });
         console.log('Headquarters response:', response);
         
     } catch (error) {
