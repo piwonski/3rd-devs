@@ -66,6 +66,10 @@ export class HeadquartersService {
         return this.requestService.post<LoopApiBody, any>(`${this.host}/places`, { apikey: this.apiKey, query });
     }
 
+    async getStoryQuestions(): Promise<string> {
+        return this.requestService.getText(`${this.getApiKeyDataPath()}/story.json`);
+    }
+
     report<ANSWER>(task: string, answer: ANSWER) {
         return this.requestService.post<ReportBody<ANSWER>, HeadquartersResponse>(`${this.host}/report`, { task, apikey: this.apiKey, answer });
     }

@@ -8,24 +8,7 @@ import * as path from 'path';
 import { DownloadService } from "../shared/DownloadService";
 import { UnzipService } from "../shared/UnzipService";
 import type { Question, Answer, QuestionWithContext, Feedback } from "../shared/agentTypes";
-
-// Function to decode Unicode escape sequences
-const decodeUnicode = (obj: any): any => {
-    if (typeof obj === 'string') {
-        return obj.replace(/\\u[\dA-F]{4}/gi, (match) => 
-            String.fromCharCode(parseInt(match.replace(/\\u/g, ''), 16))
-        );
-    } else if (Array.isArray(obj)) {
-        return obj.map(decodeUnicode);
-    } else if (obj && typeof obj === 'object') {
-        const decoded: any = {};
-        for (const [key, value] of Object.entries(obj)) {
-            decoded[key] = decodeUnicode(value);
-        }
-        return decoded;
-    }
-    return obj;
-};
+import { UnicodeUtils } from "../shared/UnicodeUtils";
 
 interface AgentContext {
     factSummaries: Record<string, string>;
@@ -47,6 +30,7 @@ export class Agent {
     private readonly unzipService: UnzipService;
     private readonly openAIService: OpenAIService;
     private readonly expenseCounter: ExpenseCounter;
+    private readonly unicodeUtils: UnicodeUtils;
     private state: AgentState;
 
     constructor() {
@@ -58,6 +42,7 @@ export class Agent {
         this.unzipService = new UnzipService(cacheDir);
         this.expenseCounter = new ExpenseCounter();
         this.openAIService = new OpenAIService(3072, this.expenseCounter);
+        this.unicodeUtils = new UnicodeUtils();
         this.state = {
             context: {
                 factSummaries: {},
@@ -226,7 +211,7 @@ export class Agent {
         const transcriptionsData = await this.cacheService.getOrFetchJson('phone_sorted.json', async () => {
             const data = await this.headquartersService.getSortedPhoneTranscriptions();
             const parsed = JSON.parse(data);
-            return decodeUnicode(parsed);
+            return this.unicodeUtils.decodeUnicode(parsed);
         });
         console.log("✅ Phone transcriptions received", { count: Object.keys(transcriptionsData).length });
 
@@ -256,7 +241,7 @@ export class Agent {
         const questionsData = await this.cacheService.getOrFetchJson('phone-questions.json', async () => {
             const data = await this.headquartersService.getPhoneQuestions();
             const parsed = JSON.parse(data);
-            return decodeUnicode(parsed);
+            return this.unicodeUtils.decodeUnicode(parsed);
         });
         console.log("✅ Phone questions received", { count: Object.keys(questionsData).length });
         console.log("❓ Phone questions:", questionsData);
